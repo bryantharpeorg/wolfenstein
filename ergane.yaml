@@ -2,6 +2,8 @@
 # this file to learn which commands decide its fate. Declared, never auto-detected.
 #
 # Schema v1 — ergane specs/002-verification-gating/contracts/factory-yaml.md.
+# Renamed factory.yaml -> ergane.yaml 2026-08-29: 0.5.0 prefers the new name and
+# `resolve_manifest_path` lets ergane.yaml shadow a legacy factory.yaml silently.
 
 version: 1
 
@@ -16,10 +18,14 @@ runtime: bwrap
 # browser game — it drives the built page in headless Chromium, fails on any
 # console error or uncaught exception, and reads window.__diag back to confirm
 # the render loop is actually running. Compiling is not passing.
+# Schema v1 fixes the legal gate names to `test`, `lint` and `typecheck` so the
+# merge queue can map one required check to one gate. There is no `build` gate,
+# so the build is folded into `test`, where it belongs anyway: `npm run smoke`
+# drives the BUILT page, so a build failure has to fail the same gate the smoke
+# run reports on. Compiling is not passing.
 gates:
   typecheck: "npm run typecheck"
-  build: "npm run build"
-  test: "npm run test && npm run smoke"
+  test: "npm run build && npm run test && npm run smoke"
 
 # The document every agent attempt is told to read and obey.
 standards: .specify/memory/constitution.md

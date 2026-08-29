@@ -32,3 +32,6 @@ playwright-report/
 .DS_Store
 .env
 .env.*
+
+# Ergane runtime root: worktrees, session transcripts, verification evidence.
+.ergane/
