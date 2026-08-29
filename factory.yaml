@@ -1,0 +1,28 @@
+# What "green" means for this repository. Every agent node dispatched here reads
+# this file to learn which commands decide its fate. Declared, never auto-detected.
+#
+# Schema v1 — ergane specs/002-verification-gating/contracts/factory-yaml.md.
+
+version: 1
+
+runtime: bwrap
+
+# Three gates, and each one has to actually be installed or it FAILS the node
+# rather than skipping it. All three are wired by 001-scaffold US3; a node
+# dispatched before that lands will fail here, which is correct.
+#
+# `test` runs the vitest suite (pure logic: grid, collision, pathing, door
+# machines, texture pixel math, damage). `smoke` is the load-bearing gate for a
+# browser game — it drives the built page in headless Chromium, fails on any
+# console error or uncaught exception, and reads window.__diag back to confirm
+# the render loop is actually running. Compiling is not passing.
+gates:
+  typecheck: "npm run typecheck"
+  build: "npm run build"
+  test: "npm run test && npm run smoke"
+
+# The document every agent attempt is told to read and obey.
+standards: .specify/memory/constitution.md
+
+# The branch the factory lands on. Declared by the operator, never by a node.
+landing_branch: main
