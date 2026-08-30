@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createDoor, stepDoor, interactDoor, type Door } from '../../src/interaction/door';
 import { DOOR_TRAVEL_MS, DOOR_DWELL_MS } from '../../src/interaction/params';
-import { INTERACT_OUTCOMES } from '../../src/interaction/outcomes';
+import { INTERACT_OUTCOMES, isMovingRefusal } from '../../src/interaction/outcomes';
 
 function advance(door: Door, totalMs: number, tickMs = 100): void {
   let remaining = totalMs;
@@ -26,23 +26,40 @@ function doorInState(state: 'opening' | 'open' | 'closing'): Door {
 }
 
 describe('a moving door refuses the interact command (US1-S5, FR-003)', () => {
-  it('reports blocked-moving while opening, leaving state and progress untouched', () => {
-    const door = doorInState('opening');
-    const before = door.progress;
+  // US1-S5 names both moving states, so both are asserted here: the refusal, and
+  // the untouched state and progress. Which name the refusal carries is US1-S6's
+  // subject and is asserted separately below.
+  for (const state of ['opening', 'closing'] as const) {
+    it(`refuses a door in ${state}, leaving state and progress untouched`, () => {
+      const door = doorInState(state);
+      if (state === 'closing') advance(door, DOOR_TRAVEL_MS / 2);
+      const before = door.progress;
+      expect(door.state).toBe(state);
 
-    expect(interactDoor(door)).toBe('blocked-moving');
-    expect(door.state).toBe('opening');
-    expect(door.progress).toBe(before);
-  });
+      const outcome = interactDoor(door);
+      expect(isMovingRefusal(outcome)).toBe(true);
+      expect(door.state).toBe(state);
+      expect(door.progress).toBe(before);
+    });
 
-  it('does not reverse or re-trigger a door that is opening', () => {
-    const door = doorInState('opening');
-    for (let i = 0; i < 100; i += 1) {
-      expect(interactDoor(door)).toBe('blocked-moving');
-    }
-    advance(door, DOOR_TRAVEL_MS);
-    expect(door.state).toBe('open');
-    expect(door.progress).toBe(1);
+    it(`does not reverse or re-trigger a door that is ${state}`, () => {
+      const door = doorInState(state);
+      const before = door.progress;
+      for (let i = 0; i < 100; i += 1) {
+        expect(isMovingRefusal(interactDoor(door))).toBe(true);
+      }
+      // Neither the progress nor the direction of travel moved under the spam.
+      expect(door.progress).toBe(before);
+      expect(door.state).toBe(state);
+      advance(door, DOOR_TRAVEL_MS);
+      expect(door.state).toBe(state === 'opening' ? 'open' : 'closed');
+      expect(door.progress).toBe(state === 'opening' ? 1 : 0);
+    });
+  }
+
+  it('names the opening case blocked-moving and the closing case refusing-closing', () => {
+    expect(interactDoor(doorInState('opening'))).toBe('blocked-moving');
+    expect(interactDoor(doorInState('closing'))).toBe('refusing-closing');
   });
 });
 
