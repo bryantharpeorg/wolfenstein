@@ -508,37 +508,13 @@ async function runLockedDoorPass(browser, url) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await context.newPage();
   const errors = [];
-  page.on('pageerror', (error) => {
-    errors.push(`pageerror: ${error.message}`);
-  });
-
-  await page.goto(url, { waitUntil: 'load' });
-
-  // The scripted drive, shared by every leg of the route below. Declared as a
-  // string because it is installed in the page, not run in node.
-  const installDrive = () => {
-    window.__smokeWalkTo = (targetX, targetZ) => {
-      const SPEED = 4;
-      for (let step = 0; step < 400; step += 1) {
-        // `__diag.player` is a live object, so the previous position has to be
-        // read out as numbers or the no-progress check compares a value to itself.
-        const fromX = window.__diag.player.x;
-        const fromZ = window.__diag.player.z;
-        const dx = targetX - fromX;
-        const dz = targetZ - fromZ;
-        const distance = Math.hypot(dx, dz);
-        if (distance < 0.05) break;
-        window.__playerDrive((SPEED * dx) / distance, (SPEED * dz) / distance, 50);
-        const moved = Math.hypot(window.__diag.player.x - fromX, window.__diag.player.z - fromZ);
-        if (moved < 1e-4) break;
-      }
-      return { x: window.__diag.player.x, z: window.__diag.player.z };
-    };
-    window.__smokeInteract = () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
-    };
+  page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
+  const finish = async () => {
+    await context.close();
+    return errors;
   };
 
+  await page.goto(url, { waitUntil: 'load' });
   try {
     await page.waitForFunction(
       () =>
@@ -549,30 +525,52 @@ async function runLockedDoorPass(browser, url) {
         typeof window.__playerDrive === 'function',
       { timeout: 15000 },
     );
-  } catch (timeoutError) {
-    errors.push(
-      `__diag.interaction / __playerDrive did not become available within 15 seconds (${
-        timeoutError instanceof Error ? timeoutError.message : String(timeoutError)
-      })`,
-    );
-    await context.close();
-    return errors;
+  } catch (error) {
+    errors.push(`__diag.interaction / __playerDrive did not appear within 15 seconds (${error})`);
+    return finish();
   }
 
-  await page.evaluate(installDrive);
+  // The scripted drive, installed in the page because it is run there, not here.
+  await page.evaluate(() => {
+    window.__smokeWalkTo = (targetX, targetZ) => {
+      for (let step = 0; step < 400; step += 1) {
+        // `__diag.player` is a live object, so the previous position has to be read
+        // out as numbers or the no-progress check compares a value to itself.
+        const fromX = window.__diag.player.x;
+        const fromZ = window.__diag.player.z;
+        const distance = Math.hypot(targetX - fromX, targetZ - fromZ);
+        if (distance < 0.05) break;
+        window.__playerDrive((4 * (targetX - fromX)) / distance, (4 * (targetZ - fromZ)) / distance, 50);
+        const moved = Math.hypot(window.__diag.player.x - fromX, window.__diag.player.z - fromZ);
+        if (moved < 1e-4) break;
+      }
+      return { x: window.__diag.player.x, z: window.__diag.player.z };
+    };
+    window.__smokeInteract = () =>
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+  });
+
+  // Waits for the expected reading, but never fails on the wait: the assertions
+  // below report what was actually read, which is the more useful message.
+  const settle = async (predicate) => {
+    try {
+      await page.waitForFunction(predicate, { timeout: 8000 });
+    } catch {
+      /* reported by the assertion that follows */
+    }
+  };
+  const interaction = () => page.evaluate(() => ({ ...window.__diag.interaction }));
 
   // Leg 1: south to the unlocked door at (10,21), open it, walk through.
   await page.evaluate(() => {
     window.__smokeWalkTo(10.5, 20.5);
     window.__smokeInteract();
   });
-  try {
-    await page.waitForFunction(() => window.__diag.interaction.doorsOpen >= 1, { timeout: 15000 });
-  } catch {
-    const reason = await page.evaluate(() => window.__diag.interaction.lastReason);
-    errors.push(`no door opened after the interact command (lastReason=${reason})`);
-    await context.close();
-    return errors;
+  await settle(() => window.__diag.interaction.doorsOpen >= 1);
+  const opening = await interaction();
+  if (!(opening.doorsOpen >= 1)) {
+    errors.push(`no door opened after the interact command (lastReason=${opening.lastReason})`);
+    return finish();
   }
 
   // Leg 2: through the doorway, east along row 31, up to the silver-locked door.
@@ -584,30 +582,20 @@ async function runLockedDoorPass(browser, url) {
     errors.push(
       `walk to the locked door ended at (${atDoor.x.toFixed(2)}, ${atDoor.z.toFixed(2)}), not beside it`,
     );
-    await context.close();
-    return errors;
+    return finish();
   }
 
   // The refusal: named reason, named key, and no key spent to learn it.
   await page.evaluate(() => window.__smokeInteract());
-  try {
-    await page.waitForFunction(
-      () => window.__diag.interaction.lastRefusalKeyKind != null,
-      { timeout: 5000 },
-    );
-  } catch {
-    // Fall through to the assertions below, which report what was actually read.
-  }
-  const refused = await page.evaluate(() => ({ ...window.__diag.interaction }));
+  await settle(() => window.__diag.interaction.lastRefusalKeyKind != null);
+  const refused = await interaction();
   if (refused.lastReason !== 'locked-missing-key') {
     errors.push(`__diag.interaction.lastReason is ${refused.lastReason}, not locked-missing-key`);
   }
   if (refused.lastRefusalKeyKind !== 'silver') {
-    errors.push(
-      `__diag.interaction.lastRefusalKeyKind is ${refused.lastRefusalKeyKind}, not silver`,
-    );
+    errors.push(`__diag.interaction.lastRefusalKeyKind is ${refused.lastRefusalKeyKind}, not silver`);
   }
-  if (refused.keys == null || refused.keys.silver !== 0) {
+  if (refused.keys?.silver !== 0) {
     errors.push(`__diag.interaction.keys.silver is ${refused.keys?.silver}, not 0 before pickup`);
   }
 
@@ -616,13 +604,10 @@ async function runLockedDoorPass(browser, url) {
     window.__smokeWalkTo(30.5, 31.5);
     window.__smokeWalkTo(30.5, 30.5);
   });
-  try {
-    await page.waitForFunction(() => window.__diag.interaction.keys.silver === 1, { timeout: 5000 });
-  } catch {
-    const keys = await page.evaluate(() => JSON.stringify(window.__diag.interaction.keys));
-    errors.push(`silver key was not collected on its tile: keys=${keys}`);
-    await context.close();
-    return errors;
+  await settle(() => window.__diag.interaction.keys.silver === 1);
+  if ((await interaction()).keys?.silver !== 1) {
+    errors.push('the silver key was not collected on its tile');
+    return finish();
   }
 
   // The same door, the same press, the other outcome - and the key stays.
@@ -631,18 +616,12 @@ async function runLockedDoorPass(browser, url) {
     window.__smokeWalkTo(41.5, 31.5);
     window.__smokeInteract();
   });
-  try {
-    await page.waitForFunction(() => window.__diag.interaction.lastReason === 'opened', {
-      timeout: 5000,
-    });
-  } catch {
-    // Reported by the assertions below.
-  }
-  const opened = await page.evaluate(() => ({ ...window.__diag.interaction }));
+  await settle(() => window.__diag.interaction.lastReason === 'opened');
+  const opened = await interaction();
   if (opened.lastReason !== 'opened') {
     errors.push(`the locked door did not open with its key: lastReason=${opened.lastReason}`);
   }
-  if (opened.keys == null || opened.keys.silver !== 1) {
+  if (opened.keys?.silver !== 1) {
     errors.push(`the silver key did not survive the unlock: keys.silver=${opened.keys?.silver}`);
   }
   if (opened.keyConsumed !== false) {
@@ -654,8 +633,7 @@ async function runLockedDoorPass(browser, url) {
     );
   }
 
-  await context.close();
-  return errors;
+  return finish();
 }
 
 async function main() {

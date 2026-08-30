@@ -3,15 +3,13 @@
 // a fact about what the player carries rather than about the map they carry it
 // through. `pickups.ts` is where the two meet.
 
-/** The two kinds, declared once and in the order the HUD reads them (FR-007). */
+/** The two kinds, declared once and in the order the HUD reads them. */
 export const KEY_KINDS = ['silver', 'gold'] as const;
 
 export type KeyKind = (typeof KEY_KINDS)[number];
 
 /** Counts keyed by kind — the whole of the inventory's shape (US2-S1). */
 export type KeyCounts = Record<KeyKind, number>;
-
-/** The inventory *is* its counts: `Object.keys(inventory)` is exactly the kinds. */
 export type KeyInventory = KeyCounts;
 
 export function createInventory(): KeyInventory {

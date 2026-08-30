@@ -1,6 +1,6 @@
 // FR-011: a locked door whose key lies behind it is an unwinnable map, and the
-// validator should say so by name rather than let a player discover it forty
-// tiles in. Pure, and the grid arrives in the context, so a fixture is testable.
+// validator should say so by name rather than let a player discover it forty tiles
+// in. Pure, and the grid arrives in the context, so a fixture is testable.
 
 import type { LevelError } from '../../level-validate';
 import type { LevelRule, LevelRuleContext } from '../level-rules';
@@ -13,16 +13,13 @@ declare module '../level-rules' {
   }
 }
 
-// The same walkable set 002's reachability uses: floor, doors, secrets and the
-// exit. A door is crossed by the flood because it is a door, not a wall — which
-// is exactly why the door under test has to be excluded explicitly.
-function isWalkable(cell: string): boolean {
-  return cell === '0' || cell === 'D' || cell === 'S' || cell === 'E';
-}
+// The same walkable set 002's reachability uses. A door is crossed by the flood
+// because it is a door, not a wall — which is exactly why the door under test has
+// to be excluded explicitly.
+const isWalkable = (cell: string): boolean =>
+  cell === '0' || cell === 'D' || cell === 'S' || cell === 'E';
 
-function cellAt(grid: readonly string[], x: number, z: number): string {
-  return grid[z]?.[x] ?? ' ';
-}
+const cellAt = (grid: readonly string[], x: number, z: number): string => grid[z]?.[x] ?? ' ';
 
 /** 002's 4-neighbour flood from the spawn, with one tile treated as solid. */
 function reachableFrom(
@@ -41,17 +38,17 @@ function reachableFrom(
   visited.add(`${startX},${startZ}`);
   while (queue.length > 0) {
     const [x, z] = queue.shift()!;
-    for (const [nx, nz] of [
+    const neighbours: Array<[number, number]> = [
       [x + 1, z],
       [x - 1, z],
       [x, z + 1],
       [x, z - 1],
-    ] as Array<[number, number]>) {
+    ];
+    for (const [nx, nz] of neighbours) {
       if (nx < 0 || nx >= cols || nz < 0 || nz >= rows) continue;
       if (nx === blockedX && nz === blockedZ) continue;
       const key = `${nx},${nz}`;
-      if (visited.has(key)) continue;
-      if (!isWalkable(cellAt(grid, nx, nz))) continue;
+      if (visited.has(key) || !isWalkable(cellAt(grid, nx, nz))) continue;
       visited.add(key);
       queue.push([nx, nz]);
     }
