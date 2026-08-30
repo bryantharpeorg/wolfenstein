@@ -1,3 +1,8 @@
+---
+state: ready
+depends_on_landed: ["003-player"]
+---
+
 # Feature Specification: Doors, Keys and Secrets
 
 **Feature Branch**: `004-interaction`

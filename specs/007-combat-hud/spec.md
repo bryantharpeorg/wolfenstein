@@ -1,3 +1,8 @@
+---
+state: ready
+depends_on_landed: ["006-enemies"]
+---
+
 # Feature Specification: Weapons, Combat Loop and HUD
 
 **Feature Branch**: `007-combat-hud`

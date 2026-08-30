@@ -1,3 +1,8 @@
+---
+state: ready
+depends_on_landed: ["001-scaffold"]
+---
+
 # Feature Specification: Level Map and Merged Geometry
 
 **Feature Branch**: `002-map-geometry`

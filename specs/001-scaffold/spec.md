@@ -1,5 +1,5 @@
 ---
-state: ready
+state: landed
 ---
 
 # Feature Specification: Project Scaffold and Render Harness

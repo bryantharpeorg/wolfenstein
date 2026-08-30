@@ -1,3 +1,8 @@
+---
+state: ready
+depends_on_landed: ["007-combat-hud"]
+---
+
 # Feature Specification: Elevator Exit, Audio and Post-Processing
 
 **Feature Branch**: `008-polish`
