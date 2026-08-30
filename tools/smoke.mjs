@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright';
@@ -34,10 +34,32 @@ function resolveBrowserExecutable() {
   }
   const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
   if (browsersPath != null) {
-    const chromiumRoot = resolve(browsersPath, 'chromium-1234', 'chrome-linux64', 'chrome');
-    if (existsSync(chromiumRoot)) {
-      return chromiumRoot;
+    let entries = [];
+    try {
+      entries = readdirSync(browsersPath, { withFileTypes: true });
+    } catch (err) {
+      fail(
+        `Cannot read PLAYWRIGHT_BROWSERS_PATH=${browsersPath}: ${err instanceof Error ? err.message : String(err)}. ` +
+          `Set CHROME_PATH to a chrome binary or point PLAYWRIGHT_BROWSERS_PATH at a valid browsers directory.`,
+      );
     }
+    const candidates = [];
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.startsWith('chromium')) {
+        const chromeBin = resolve(browsersPath, entry.name, 'chrome-linux64', 'chrome');
+        if (existsSync(chromeBin)) {
+          candidates.push(chromeBin);
+        }
+      }
+    }
+    if (candidates.length > 0) {
+      candidates.sort();
+      return candidates[0];
+    }
+    fail(
+      `Chromium executable not found under PLAYWRIGHT_BROWSERS_PATH=${browsersPath}. ` +
+        `Set CHROME_PATH to a chrome binary or ensure a chromium-*/chrome-linux64/chrome directory exists.`,
+    );
   }
   try {
     return chromium.executablePath();
@@ -254,7 +276,6 @@ async function runSmoke(url, logs, options = {}) {
 const SELF_TEST = process.argv.includes('--self-test');
 
 async function main() {
-  checkDist();
   checkNoBinaries();
   checkBrowser();
 
@@ -262,6 +283,7 @@ async function main() {
   const logs = [];
   try {
     await build();
+    checkDist();
     server = await startServer();
 
     if (SELF_TEST) {
