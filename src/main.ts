@@ -1,31 +1,125 @@
-const container = document.getElementById('canvas-container');
-if (container == null) {
-  throw new Error('Missing canvas-container element');
+import { selectBackend } from './renderer/select';
+import { createRenderer, isRendererFailure } from './renderer/create';
+import { buildEmptyScene, resizeCamera } from './scene/empty';
+import { createDiagnostics, updateFps } from './diag/diag';
+import { createPerfOverlay, installToggle } from './overlay/perf';
+import type { WebGLRenderer } from 'three/src/renderers/WebGLRenderer.js';
+import type WebGPURenderer from 'three/src/renderers/webgpu/WebGPURenderer.js';
+
+type Renderer = WebGLRenderer | WebGPURenderer;
+
+function showFatalMessage(message: string): void {
+  document.body.innerHTML = '';
+  const paragraph = document.createElement('p');
+  paragraph.textContent = message;
+  paragraph.style.padding = '1rem';
+  paragraph.style.color = '#fff';
+  paragraph.style.fontFamily = 'sans-serif';
+  document.body.appendChild(paragraph);
 }
 
-const canvas = document.createElement('canvas');
-canvas.id = 'game-canvas';
-container.appendChild(canvas);
+function attachErrorHandlers(): void {
+  window.onerror = (_event, _source, _lineno, _colno, error) => {
+    const message = error?.message ?? String(error ?? 'unknown error');
+    if (window.__diag != null) {
+      window.__diag.errors.push(message);
+    }
+    return false;
+  };
 
-const ctx = canvas.getContext('2d');
-if (ctx == null) {
-  throw new Error('Could not obtain 2D context');
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    originalConsoleError.apply(console, args);
+    if (window.__diag != null) {
+      window.__diag.errors.push(args.map(String).join(' '));
+    }
+  };
 }
 
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+function makeRenderer(): Renderer {
+  const backend = selectBackend(navigator);
+
+  const container = document.getElementById('canvas-container');
+  if (container == null) {
+    throw new Error('Missing canvas-container element');
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.id = 'game-canvas';
+  container.appendChild(canvas);
+
+  return createRenderer({ canvas, backend });
 }
 
-function draw(context: CanvasRenderingContext2D) {
-  context.fillStyle = '#000000';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = '#ffffff';
-  context.font = '24px sans-serif';
-  context.textAlign = 'center';
-  context.fillText('Wolfenstein Clone', canvas.width / 2, canvas.height / 2);
+async function run() {
+  attachErrorHandlers();
+
+  const backend = selectBackend(navigator);
+  const diag = createDiagnostics(backend);
+  window.__diag = diag;
+
+  const overlay = createPerfOverlay();
+  installToggle(overlay);
+
+  let renderer: Renderer;
+  try {
+    renderer = makeRenderer();
+  } catch (error) {
+    if (isRendererFailure(error)) {
+      showFatalMessage(`Renderer initialization failed for ${error.backend}: ${error.reason}`);
+      diag.renderer = error.backend;
+      diag.errors.push(`Failed backend ${error.backend}: ${error.reason}`);
+    } else {
+      const reason = error instanceof Error ? error.message : String(error);
+      showFatalMessage(`Renderer initialization failed: ${reason}`);
+      diag.errors.push(reason);
+    }
+    return;
+  }
+
+  const empty = buildEmptyScene();
+  resizeCamera(empty.camera);
+
+  function resize() {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    renderer.setSize(width, height, false);
+    resizeCamera(empty.camera);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+
+  let lastTime = performance.now();
+
+  function frame(now: number) {
+    const delta = now - lastTime;
+    lastTime = now;
+
+    const cube = empty.meshes[0]!;
+    cube.rotation.x += 0.01;
+    cube.rotation.y += 0.01;
+
+    renderer.render(empty.scene, empty.camera);
+
+    diag.drawCalls =
+      'drawCalls' in renderer.info.render
+        ? (renderer.info.render as { drawCalls: number }).drawCalls
+        : renderer.info.render.calls;
+    updateFps(diag, delta);
+    overlay.update(diag);
+    diag.ready = true;
+
+    requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
 }
 
-window.addEventListener('resize', resize);
-resize();
-draw(ctx);
+run();
+
+declare global {
+  interface Window {
+    __diag: import('./diag/diag').Diagnostics;
+  }
+}

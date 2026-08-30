@@ -4,6 +4,6 @@ export interface Capabilities {
   gpu?: unknown;
 }
 
-export function selectBackend(capabilities: Capabilities): RendererBackend {
-  return capabilities.gpu != null ? 'webgpu' : 'webgl';
+export function selectBackend(capabilities: Capabilities | Navigator): RendererBackend {
+  return (capabilities as Capabilities).gpu != null ? 'webgpu' : 'webgl';
 }
