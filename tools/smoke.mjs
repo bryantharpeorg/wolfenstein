@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { walkAndReport } from './check-no-binaries.mjs';
 import { SMOKE_FPS_FLOOR } from './smoke-floor.mjs';
+import { interactionErrors, runSecretPass } from './smoke-interaction.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -328,7 +329,7 @@ async function assertDiag(page, url, { expectRenderer, expectReady = true }) {
   const diag = await page.evaluate(() => {
     const d = window.__diag;
     if (d == null) {
-      return { ready: false, renderer: null, fps: 0, frameTimeMs: 0, drawCalls: 0, errors: ['window.__diag is undefined'], level: null };
+      return { ready: false, renderer: null, fps: 0, frameTimeMs: 0, drawCalls: 0, errors: ['window.__diag is undefined'], level: null, interaction: null };
     }
     return {
       ready: d.ready,
@@ -338,6 +339,7 @@ async function assertDiag(page, url, { expectRenderer, expectReady = true }) {
       drawCalls: d.drawCalls,
       errors: d.errors,
       level: d.level,
+      interaction: d.interaction == null ? null : { ...d.interaction },
     };
   });
 
@@ -380,6 +382,10 @@ async function runNormalPass(browser, url, expectedCounts) {
   const errors = [...result.errors];
 
   errors.push(...assertLevel(result.diag.level, expectedCounts));
+
+  // FR-018: the interaction contract is read on the ordinary pass too, so a
+  // malformed counter fails the gate even when no secret is ever pushed.
+  errors.push(...interactionErrors(result.diag.interaction));
 
   if (result.diag.drawCalls >= 20) {
     errors.push(`drawCalls ${result.diag.drawCalls} is not below 20`);
@@ -636,6 +642,38 @@ async function runLockedDoorPass(browser, url) {
   return finish();
 }
 
+// Pushes every secret in the shipped level and reads the counters back, so
+// "every secret in the level works" is a headless assertion rather than a
+// playtest (FR-018, US3-S4). The assertions themselves live in
+// `smoke-interaction.mjs`; this is only the page around them.
+async function runSecretsPass(browser, url, grid) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
+
+  await page.goto(url, { waitUntil: 'load' });
+  try {
+    await page.waitForFunction(
+      () =>
+        window.__diag != null &&
+        window.__diag.ready === true &&
+        window.__diag.player != null &&
+        window.__diag.interaction != null &&
+        typeof window.__playerDrive === 'function',
+      { timeout: 15000 },
+    );
+  } catch (error) {
+    errors.push(`__diag.interaction / __playerDrive did not appear within 15 seconds (${error})`);
+    await context.close();
+    return errors;
+  }
+
+  errors.push(...(await runSecretPass(page, grid)));
+  await context.close();
+  return errors;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const injectError = args.includes('--inject-error');
@@ -725,6 +763,15 @@ async function main() {
       fail('Locked door smoke pass failed');
     }
     console.log('Locked door smoke pass: refused by name, then opened with the key it named');
+
+    const secrets = await runSecretsPass(browser, url, levelGrid);
+    if (secrets.length > 0) {
+      for (const error of secrets) {
+        console.error(error);
+      }
+      fail('Secret push smoke pass failed');
+    }
+    console.log('Secret push smoke pass: every secret pushed once, secretsFound reached secretsTotal');
 
     const noGpu = await runSmokePass(
       browser,
