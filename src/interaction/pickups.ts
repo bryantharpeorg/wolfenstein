@@ -1,8 +1,7 @@
 // Key pickups over 002's item spawn table (FR-008). A pickup is consumed on
 // collection and never yields a second key, so re-entering its tile — which the
 // player does constantly, a tile being a metre wide — is idempotent (US2-S2).
-// Pure: no DOM, no three.js. The render layer places a mesh per pickup and
-// removes it when `consumed` flips.
+// Pure: no DOM, no three.js.
 
 import { ITEM_SPAWNS, type ItemKind, type ItemSpawn } from '../level';
 import { addKey, type KeyInventory, type KeyKind } from './keys';
@@ -34,23 +33,18 @@ export function buildKeyPickups(spawns: readonly ItemSpawn[] = ITEM_SPAWNS): Key
   const pickups: KeyPickup[] = [];
   for (const spawn of spawns) {
     const kind = pickupKind(spawn.kind);
-    if (kind == null) continue;
-    pickups.push({ x: spawn.x, z: spawn.z, kind, consumed: false });
+    if (kind != null) pickups.push({ x: spawn.x, z: spawn.z, kind, consumed: false });
   }
   return pickups;
 }
 
 /** The pickup occupying a tile, consumed or not. */
-export function keyPickupAt(
-  pickups: readonly KeyPickup[],
-  x: number,
-  z: number,
-): KeyPickup | null {
+export function keyPickupAt(pickups: readonly KeyPickup[], x: number, z: number): KeyPickup | null {
   return pickups.find((pickup) => pickup.x === x && pickup.z === z) ?? null;
 }
 
-/** Collects the pickup on `pickup`'s tile into `inventory`, once. A consumed
- * pickup reports `collected: false` and adds nothing (FR-008). */
+/** Collects a pickup into `inventory`, once. A consumed pickup reports
+ * `collected: false` and adds nothing (FR-008). */
 export function collectKeyPickup(pickup: KeyPickup, inventory: KeyInventory): CollectResult {
   if (pickup.consumed) return NOTHING;
   pickup.consumed = true;
@@ -66,8 +60,7 @@ export function collectKeyPickupAt(
   inventory: KeyInventory,
 ): CollectResult {
   const pickup = keyPickupAt(pickups, x, z);
-  if (pickup == null) return NOTHING;
-  return collectKeyPickup(pickup, inventory);
+  return pickup == null ? NOTHING : collectKeyPickup(pickup, inventory);
 }
 
 /** The pickups still on the floor, for the render layer's mesh bookkeeping. */

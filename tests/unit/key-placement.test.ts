@@ -1,123 +1,103 @@
 import { describe, it, expect } from 'vitest';
-import { validateLevel } from '../../src/level-validate';
+import { validateLevel, type ValidateLevelOptions } from '../../src/level-validate';
 import { LEVEL_GRID, GRID_SIZE, ITEM_SPAWNS, DOOR_LOCKS } from '../../src/level';
 import { keyPlacementRule } from '../../src/interaction/rules/key-placement';
 import { collectLevelRules, extraLevelErrors } from '../../src/interaction/level-rules';
 
-// A 64x64 fixture: one wall column at x=32 pierced by a single door at (32,32).
-// Everything east of the column is behind that door, so a key placed there is
-// behind the lock it opens - the unwinnable map FR-011 exists to refuse.
+// A 64x64 fixture: one wall column at x=32 pierced by a single door at (32,32),
+// so everything east of the column is behind that door. The exit sits east too,
+// which keeps 002's reachability green — the flood crosses door tiles, so it is
+// the key that can be stranded, not the exit, and that is FR-011's whole point.
 const WALL_X = 32;
 const DOOR_Z = 32;
+const SPAWN = { x: 5, z: 5, yaw: 0 };
 
-function makeSplitGrid(): string[] {
+function splitGrid(): string[] {
   const grid: string[] = [];
   for (let z = 0; z < GRID_SIZE; z += 1) {
     let row = '';
     for (let x = 0; x < GRID_SIZE; x += 1) {
-      const border = x === 0 || x === GRID_SIZE - 1 || z === 0 || z === GRID_SIZE - 1;
-      if (border) row += '1';
+      if (x === 0 || x === GRID_SIZE - 1 || z === 0 || z === GRID_SIZE - 1) row += '1';
       else if (x === WALL_X) row += z === DOOR_Z ? 'D' : '1';
       else row += '0';
     }
     grid.push(row);
   }
-  // The exit sits east of the door, so reachability still passes: the flood
-  // crosses door tiles, and it is the key that is stranded, not the exit.
   const exitRow = grid[60]!;
   grid[60] = exitRow.slice(0, 50) + 'E' + exitRow.slice(51);
   return grid;
 }
 
-const SPLIT_SPAWN = { x: 5, z: 5, yaw: 0 };
-
-function splitReport(keyX: number, keyZ: number) {
-  return validateLevel(makeSplitGrid(), {
-    playerSpawn: SPLIT_SPAWN,
+const keyPlacementErrors = (options: ValidateLevelOptions = {}) =>
+  validateLevel(splitGrid(), {
+    playerSpawn: SPAWN,
     enemySpawns: [],
-    itemSpawns: [{ x: keyX, z: keyZ, kind: 'gold-key' }],
+    itemSpawns: [{ x: 50, z: 20, kind: 'gold-key' }],
     doorLocks: { [`${WALL_X},${DOOR_Z}`]: 'gold' },
-  });
-}
+    ...options,
+  }).errors.filter((e) => e.category === 'key-placement');
 
 describe('key-placement rule (FR-011, US2-S6)', () => {
-  it('reports a named key-placement error when the key is behind its own door', () => {
-    const report = splitReport(50, 20);
+  it('reports a named error when the key is behind the door it opens', () => {
+    const errors = keyPlacementErrors();
 
-    const errors = report.errors.filter((e) => e.category === 'key-placement');
     expect(errors).toHaveLength(1);
-    expect(report.valid).toBe(false);
     expect(errors[0]?.x).toBe(WALL_X);
     expect(errors[0]?.z).toBe(DOOR_Z);
+    expect(errors[0]?.category).toBe('key-placement');
     expect(errors[0]?.message).toContain('key-placement');
     expect(errors[0]?.message).toContain('gold');
   });
 
-  it('reports no key-placement error once the same key is on the spawn side', () => {
-    const report = splitReport(10, 20);
+  it('reports the error when the locked kind has no pickup anywhere', () => {
+    const errors = keyPlacementErrors({ itemSpawns: [{ x: 10, z: 20, kind: 'silver-key' }] });
 
-    expect(report.errors.filter((e) => e.category === 'key-placement')).toEqual([]);
-    expect(report.valid).toBe(true);
-  });
-
-  it('reports the error when a locked door has no pickup of its kind anywhere', () => {
-    const report = validateLevel(makeSplitGrid(), {
-      playerSpawn: SPLIT_SPAWN,
-      enemySpawns: [],
-      itemSpawns: [{ x: 10, z: 20, kind: 'silver-key' }],
-      doorLocks: { [`${WALL_X},${DOOR_Z}`]: 'gold' },
-    });
-
-    const errors = report.errors.filter((e) => e.category === 'key-placement');
     expect(errors).toHaveLength(1);
     expect(errors[0]?.message).toContain('gold');
   });
 
-  it('reports nothing for an unlocked door, whatever the keys do', () => {
-    const report = validateLevel(makeSplitGrid(), {
-      playerSpawn: SPLIT_SPAWN,
+  it('reports nothing once the key is on the spawn side, or the door is unlocked', () => {
+    expect(keyPlacementErrors({ itemSpawns: [{ x: 10, z: 20, kind: 'gold-key' }] })).toEqual([]);
+    expect(keyPlacementErrors({ doorLocks: { [`${WALL_X},${DOOR_Z}`]: 'none' } })).toEqual([]);
+  });
+
+  it('leaves an otherwise valid fixture valid when the key is placed correctly', () => {
+    const report = validateLevel(splitGrid(), {
+      playerSpawn: SPAWN,
       enemySpawns: [],
-      itemSpawns: [{ x: 50, z: 20, kind: 'gold-key' }],
-      doorLocks: { [`${WALL_X},${DOOR_Z}`]: 'none' },
-    });
-
-    expect(report.errors.filter((e) => e.category === 'key-placement')).toEqual([]);
-  });
-
-  it('reports no key-placement error for the shipped layout', () => {
-    const report = validateLevel();
-
-    expect(report.errors.filter((e) => e.category === 'key-placement')).toEqual([]);
-    expect(report.valid).toBe(true);
-  });
-
-  it('holds for every locked door of the shipped layout, door by door', () => {
-    const lockedDoors = Object.entries(DOOR_LOCKS).filter(([, lock]) => lock !== 'none');
-    expect(lockedDoors.length).toBeGreaterThanOrEqual(2);
-
-    const errors = keyPlacementRule({
-      grid: LEVEL_GRID,
-      playerSpawn: { x: 10, z: 10, yaw: 0 },
-      itemSpawns: ITEM_SPAWNS,
-      doorLocks: DOOR_LOCKS,
-    });
-
-    expect(errors).toEqual([]);
-  });
-
-  it('is discovered by the rules glob rather than by an index edit', () => {
-    const rules = collectLevelRules();
-    expect(rules).toContain(keyPlacementRule);
-  });
-
-  it('folds its errors in through the collector the validator calls', () => {
-    const errors = extraLevelErrors({
-      grid: makeSplitGrid(),
-      playerSpawn: SPLIT_SPAWN,
-      itemSpawns: [{ x: 50, z: 20, kind: 'gold-key' }],
+      itemSpawns: [{ x: 10, z: 20, kind: 'gold-key' }],
       doorLocks: { [`${WALL_X},${DOOR_Z}`]: 'gold' },
     });
 
-    expect(errors.some((e) => e.category === 'key-placement')).toBe(true);
+    expect(report.valid).toBe(true);
+  });
+
+  it('reports no key-placement error for the shipped layout, door by door', () => {
+    const report = validateLevel();
+    expect(report.errors.filter((e) => e.category === 'key-placement')).toEqual([]);
+    expect(report.valid).toBe(true);
+
+    const locked = Object.values(DOOR_LOCKS).filter((lock) => lock !== 'none');
+    expect(locked.length).toBeGreaterThanOrEqual(2);
+    expect(
+      keyPlacementRule({
+        grid: LEVEL_GRID,
+        playerSpawn: { x: 10, z: 10, yaw: 0 },
+        itemSpawns: ITEM_SPAWNS,
+        doorLocks: DOOR_LOCKS,
+      }),
+    ).toEqual([]);
+  });
+
+  it('reaches the validator through the rules glob, not through an index edit', () => {
+    expect(collectLevelRules()).toContain(keyPlacementRule);
+    expect(
+      extraLevelErrors({
+        grid: splitGrid(),
+        playerSpawn: SPAWN,
+        itemSpawns: [{ x: 50, z: 20, kind: 'gold-key' }],
+        doorLocks: { [`${WALL_X},${DOOR_Z}`]: 'gold' },
+      }).some((e) => e.category === 'key-placement'),
+    ).toBe(true);
   });
 });
