@@ -168,6 +168,41 @@ function cellAt(grid, x, z) {
   return row[x] ?? ' ';
 }
 
+// The collider footprint and boundary epsilon, mirroring src/player/tiles.ts so
+// the harness recomputes walkability independently of the shipped module.
+const COLLIDER_RADIUS = 0.3;
+const BOUNDARY_EPSILON = 1e-6;
+
+// A cell that blocks the player: every non-empty cell (walls, closed doors and
+// secrets) plus out-of-bounds. Floor and the exit are walkable (FR-007).
+function isBlockingCell(cell) {
+  if (cell === '0' || cell === 'E') return false;
+  return true;
+}
+
+// Whether a circle of radius 0.3 at (x, z) lies entirely within walkable tiles,
+// treating a sub-epsilon overlap as flush rather than penetration.
+function isPlayerWalkable(grid, x, z) {
+  const minTx = Math.floor(x - COLLIDER_RADIUS);
+  const maxTx = Math.floor(x + COLLIDER_RADIUS);
+  const minTz = Math.floor(z - COLLIDER_RADIUS);
+  const maxTz = Math.floor(z + COLLIDER_RADIUS);
+  for (let tz = minTz; tz <= maxTz; tz += 1) {
+    for (let tx = minTx; tx <= maxTx; tx += 1) {
+      if (!isBlockingCell(cellAt(grid, tx, tz))) continue;
+      if (
+        tx < x + COLLIDER_RADIUS - BOUNDARY_EPSILON &&
+        tx + 1 > x - COLLIDER_RADIUS + BOUNDARY_EPSILON &&
+        tz < z + COLLIDER_RADIUS - BOUNDARY_EPSILON &&
+        tz + 1 > z - COLLIDER_RADIUS + BOUNDARY_EPSILON
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 // Recomputes the tile counts and wall-face count from the grid, mirroring the
 // validator's and face emitter's definitions without importing either.
 function recomputeCounts(grid) {
@@ -365,6 +400,106 @@ async function runNormalPass(browser, url, expectedCounts) {
   return { diag: result.diag, errors };
 }
 
+// Scripts a walk of at least 200 tiles across the shipped level through
+// `window.__playerDrive`, sampling `__diag.player` throughout, and fails with the
+// offending tile cited if `stuck` is ever true or a sampled position lies on a
+// non-walkable tile (FR-015, SC-001, SC-006).
+async function runPlayerWalkPass(browser, url, grid) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (error) => {
+    errors.push(`pageerror: ${error.message}`);
+  });
+
+  await page.goto(url, { waitUntil: 'load' });
+
+  try {
+    await page.waitForFunction(
+      () =>
+        window.__diag != null &&
+        window.__diag.ready === true &&
+        window.__diag.player != null &&
+        typeof window.__playerDrive === 'function',
+      { timeout: 15000 },
+    );
+  } catch (timeoutError) {
+    errors.push(
+      `__diag.player / __playerDrive did not become available within 15 seconds (${
+        timeoutError instanceof Error ? timeoutError.message : String(timeoutError)
+      })`,
+    );
+    await context.close();
+    return errors;
+  }
+
+  const samples = await page.evaluate(() => {
+    const SPRINT = 5.4;
+    const directions = [
+      [SPRINT, 0],
+      [0, -SPRINT],
+      [-SPRINT, 0],
+      [0, SPRINT],
+    ];
+    const samples = [];
+    let totalDist = 0;
+    let prevX = window.__diag.player.x;
+    let prevZ = window.__diag.player.z;
+    let dirIndex = 0;
+    let stepsInDir = 0;
+    const STEPS_PER_DIR = 20;
+    const MAX_STEPS = 2000;
+    let stepCount = 0;
+    while (totalDist < 200 && stepCount < MAX_STEPS) {
+      const [vx, vz] = directions[dirIndex];
+      window.__playerDrive(vx, vz, 250);
+      const p = window.__diag.player;
+      const dx = p.x - prevX;
+      const dz = p.z - prevZ;
+      totalDist += Math.hypot(dx, dz);
+      prevX = p.x;
+      prevZ = p.z;
+      samples.push({ x: p.x, z: p.z, stuck: p.stuck });
+      stepCount += 1;
+      stepsInDir += 1;
+      if (stepsInDir >= STEPS_PER_DIR) {
+        stepsInDir = 0;
+        dirIndex = (dirIndex + 1) % 4;
+      }
+    }
+    return { samples, totalDist };
+  });
+
+  if (samples.totalDist < 200) {
+    errors.push(
+      `scripted walk covered only ${samples.totalDist.toFixed(1)} tiles, fewer than 200`,
+    );
+  }
+
+  for (const sample of samples.samples) {
+    if (sample.stuck) {
+      errors.push(
+        `__diag.player.stuck became true at (${sample.x.toFixed(4)}, ${sample.z.toFixed(4)})`,
+      );
+      break;
+    }
+  }
+
+  for (const sample of samples.samples) {
+    if (!isPlayerWalkable(grid, sample.x, sample.z)) {
+      const tx = Math.floor(sample.x);
+      const tz = Math.floor(sample.z);
+      errors.push(
+        `player position (${sample.x.toFixed(4)}, ${sample.z.toFixed(4)}) lies on non-walkable tile (${tx}, ${tz})`,
+      );
+      break;
+    }
+  }
+
+  await context.close();
+  return errors;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const injectError = args.includes('--inject-error');
@@ -384,7 +519,8 @@ async function main() {
     await build();
   }
 
-  const expectedCounts = recomputeCounts(readLevelGrid());
+  const levelGrid = readLevelGrid();
+  const expectedCounts = recomputeCounts(levelGrid);
 
   const { server, url } = await startServer();
   const browserPath = resolveBrowser();
@@ -435,6 +571,15 @@ async function main() {
       fail('Normal smoke pass failed');
     }
     console.log(`Normal smoke pass: renderer=${normal.diag.renderer} fps=${normal.diag.fps.toFixed(1)}`);
+
+    const walkErrors = await runPlayerWalkPass(browser, url, levelGrid);
+    if (walkErrors.length > 0) {
+      for (const error of walkErrors) {
+        console.error(error);
+      }
+      fail('Player walk smoke pass failed');
+    }
+    console.log('Player walk smoke pass: 200 tiles walked, all positions walkable, not stuck');
 
     const noGpu = await runSmokePass(
       browser,
