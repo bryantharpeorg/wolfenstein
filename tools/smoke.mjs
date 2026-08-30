@@ -58,9 +58,10 @@ async function buildProject() {
 function startStaticServer(root, port) {
   return new Promise((resolve, reject) => {
     const server = createServer(async (req, res) => {
+      let filePath = '/';
       try {
         const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
-        let filePath = decodeURIComponent(url.pathname);
+        filePath = decodeURIComponent(url.pathname);
         if (filePath.includes('..')) {
           res.writeHead(403);
           res.end('Forbidden');
@@ -84,6 +85,12 @@ function startStaticServer(root, port) {
         res.writeHead(200, { 'Content-Type': contentType });
         res.end(content);
       } catch (err) {
+        const isFavicon = filePath === '/favicon.ico';
+        if (isFavicon) {
+          res.writeHead(204);
+          res.end();
+          return;
+        }
         if (err != null && /** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT') {
           res.writeHead(404);
           res.end('Not found');
