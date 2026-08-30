@@ -125,6 +125,22 @@ async function findPort(preferred = 4173, max = 4183) {
   throw new Error(`Could not find an open port between ${preferred} and ${max}`);
 }
 
+function findSystemBrowser() {
+  const candidates = [
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chrome',
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
 function getBrowserExecutablePath() {
   const chromePath = process.env.CHROME_PATH;
   if (chromePath) {
@@ -133,6 +149,12 @@ function getBrowserExecutablePath() {
     }
     return chromePath;
   }
+
+  const systemBrowser = findSystemBrowser();
+  if (systemBrowser != null) {
+    return systemBrowser;
+  }
+
   const defaultPath = chromium.executablePath();
   if (!existsSync(defaultPath)) {
     throw new Error(
