@@ -224,7 +224,7 @@ async function follow(page, path, errors) {
  * one, the total must be reached, the opened tile must be walkable, and a further
  * push must answer `already-open` without moving the counter.
  */
-export async function runSecretPass(page, grid) {
+async function secretPass(page, grid) {
   const errors = [];
   const read = () => page.evaluate(() => ({ ...window.__diag.interaction }));
   const settle = async (predicate) => {
@@ -331,5 +331,35 @@ export async function runSecretPass(page, grid) {
   const captured = await page.evaluate(() => window.__diag.errors.slice());
   for (const entry of captured) errors.push(`__diag.errors: ${entry}`);
 
+  return errors;
+}
+
+// The page the secret pass runs in. Kept here rather than in `smoke.mjs` so the
+// harness's entry file grows by a call rather than by a browser fixture.
+export async function runSecretsPass(browser, url, grid) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
+
+  await page.goto(url, { waitUntil: 'load' });
+  try {
+    await page.waitForFunction(
+      () =>
+        window.__diag != null &&
+        window.__diag.ready === true &&
+        window.__diag.player != null &&
+        window.__diag.interaction != null &&
+        typeof window.__playerDrive === 'function',
+      { timeout: 15000 },
+    );
+  } catch (error) {
+    errors.push(`__diag.interaction / __playerDrive did not appear within 15 seconds (${error})`);
+    await context.close();
+    return errors;
+  }
+
+  errors.push(...(await secretPass(page, grid)));
+  await context.close();
   return errors;
 }

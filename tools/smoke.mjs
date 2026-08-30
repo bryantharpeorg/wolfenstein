@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { walkAndReport } from './check-no-binaries.mjs';
 import { SMOKE_FPS_FLOOR } from './smoke-floor.mjs';
-import { interactionErrors, runSecretPass } from './smoke-interaction.mjs';
+import { interactionErrors, runSecretsPass } from './smoke-interaction.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -640,38 +640,6 @@ async function runLockedDoorPass(browser, url) {
   }
 
   return finish();
-}
-
-// Pushes every secret in the shipped level and reads the counters back, so
-// "every secret in the level works" is a headless assertion rather than a
-// playtest (FR-018, US3-S4). The assertions themselves live in
-// `smoke-interaction.mjs`; this is only the page around them.
-async function runSecretsPass(browser, url, grid) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-  const page = await context.newPage();
-  const errors = [];
-  page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
-
-  await page.goto(url, { waitUntil: 'load' });
-  try {
-    await page.waitForFunction(
-      () =>
-        window.__diag != null &&
-        window.__diag.ready === true &&
-        window.__diag.player != null &&
-        window.__diag.interaction != null &&
-        typeof window.__playerDrive === 'function',
-      { timeout: 15000 },
-    );
-  } catch (error) {
-    errors.push(`__diag.interaction / __playerDrive did not appear within 15 seconds (${error})`);
-    await context.close();
-    return errors;
-  }
-
-  errors.push(...(await runSecretPass(page, grid)));
-  await context.close();
-  return errors;
 }
 
 async function main() {
