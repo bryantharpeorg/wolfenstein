@@ -1,14 +1,12 @@
-// Geometry builder entry point. US1 owns the guard: no geometry is ever built
-// from a malformed map (US1-S6). The actual face emission and mesh assembly
-// land in US2 (T012-T016); this module is the seam that runs `validateLevel()`
-// first and throws a typed failure carrying the error list when the grid is
-// invalid, so a bad map is refused before any geometry is built from it.
-//
-// Pure: no three.js, no DOM (FR-004). US2 adds the three.js import when it
-// turns the emitted faces into BufferGeometry meshes.
+// Geometry builder: turns the emitted faces into three.js meshes. This is the
+// only new three.js file in US2 (FR-007). It runs `validateLevel()` first and
+// throws a typed failure on a malformed map (US1-S6), then merges the emitted
+// faces into one `BufferGeometry` per wall type plus one floor and one ceiling.
 
+import { BufferGeometry, BufferAttribute, Mesh, MeshStandardMaterial } from 'three';
 import { validateLevel, type ValidationReport, type ValidateLevelOptions } from '../level-validate';
-import { LEVEL_GRID } from '../level';
+import { LEVEL_GRID, WALL_MATERIALS, DEFAULT_WALL_MATERIAL } from '../level';
+import { emitFaces, type FaceData } from './faces';
 
 // A typed build failure carrying the validator's report, so the caller (US2's
 // level system) can render the named errors into the document body instead of a
@@ -26,19 +24,32 @@ export class LevelBuildError extends Error {
   }
 }
 
-// The geometry US2 assembles from the emitted faces. US1 leaves it empty: the
-// guard below is the only part of the build contract this story depends on.
 export interface LevelGeometry {
-  walls: unknown[];
-  floor: unknown;
-  ceiling: unknown;
+  walls: Mesh[];
+  floor: Mesh;
+  ceiling: Mesh;
+  /** Wall type IDs that had no material entry and fell back to the default. */
+  fallbackTypes: string[];
 }
 
-// Builds level geometry from a grid, refusing a malformed map first. Throws
-// `LevelBuildError` (carrying the full validation report) when the grid is
-// invalid, so geometry building from a bad grid throws rather than rendering
-// (US1-S6). Returns an empty geometry set for a valid grid until US2 fills in
-// the face emission and mesh assembly.
+// Flat colours for the floor and ceiling; M4 attaches procedural textures to
+// these same meshes without changing the draw-call budget.
+const FLOOR_COLOR = 0x5a5a5a;
+const CEILING_COLOR = 0x7a7a7a;
+
+function buildBufferGeometry(data: FaceData): BufferGeometry {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(data.positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(data.normals, 3));
+  geometry.setAttribute('uv', new BufferAttribute(data.uvs, 2));
+  geometry.setIndex(new BufferAttribute(data.indices, 1));
+  return geometry;
+}
+
+function isWallType(type: string): boolean {
+  return type >= '1' && type <= '9';
+}
+
 export function buildLevelGeometry(
   grid: string[] = LEVEL_GRID,
   options: ValidateLevelOptions = {},
@@ -47,5 +58,29 @@ export function buildLevelGeometry(
   if (!report.valid) {
     throw new LevelBuildError(report);
   }
-  return { walls: [], floor: null, ceiling: null };
+
+  const faces = emitFaces(grid);
+
+  const walls: Mesh[] = [];
+  const fallbackTypes: string[] = [];
+  for (const type of Object.keys(faces.walls)) {
+    const entry = WALL_MATERIALS[type];
+    const material = entry ?? DEFAULT_WALL_MATERIAL;
+    if (entry === undefined && isWallType(type)) {
+      fallbackTypes.push(type);
+    }
+    const geometry = buildBufferGeometry(faces.walls[type]!);
+    walls.push(new Mesh(geometry, new MeshStandardMaterial({ color: material.color })));
+  }
+
+  const floor = new Mesh(
+    buildBufferGeometry(faces.floor),
+    new MeshStandardMaterial({ color: FLOOR_COLOR }),
+  );
+  const ceiling = new Mesh(
+    buildBufferGeometry(faces.ceiling),
+    new MeshStandardMaterial({ color: CEILING_COLOR }),
+  );
+
+  return { walls, floor, ceiling, fallbackTypes };
 }
