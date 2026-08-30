@@ -1,3 +1,5 @@
+import type { LevelStats } from '../level-stats';
+
 export interface Diagnostics {
   ready: boolean;
   renderer: 'webgpu' | 'webgl' | null;
@@ -6,6 +8,8 @@ export interface Diagnostics {
   drawCalls: number;
   errors: string[];
   fallbackReason: string | null;
+  /** Level facts published by the level-diag system; null until it runs. */
+  level: LevelStats | null;
 }
 
 interface FrameSamples {
@@ -39,6 +43,7 @@ export function createDiagnostics(renderer: 'webgpu' | 'webgl' = 'webgl'): Diagn
     drawCalls: 0,
     errors: [],
     fallbackReason: null,
+    level: null,
   };
 }
 
