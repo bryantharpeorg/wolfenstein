@@ -1,5 +1,5 @@
 ---
-state: ready
+state: landed
 depends_on_landed: ["001-scaffold"]
 ---
 
