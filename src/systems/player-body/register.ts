@@ -13,10 +13,12 @@ import { getPlayerState } from '../../player/state';
 import { ensurePlayerDiag, type PlayerDiagnostics } from '../../player/diag-player';
 import { integrate } from '../../player/integrate';
 import { installPlayerDrive } from '../../player/drive-hook';
+import { liveOpenTiles } from '../../interaction/open-state';
 import type { OpenState } from '../../player/tiles';
 
-// All doors and secrets are closed until M3 opens them (FR-007).
-const OPEN_STATE: OpenState = new Set<string>();
+// The live open state: a door or secret blocks until its own system publishes it
+// as passable (004 FR-016, 003 FR-007) — 003 already took open state as an arg.
+const OPEN_STATE: OpenState = liveOpenTiles;
 
 let playerDiag: PlayerDiagnostics | null = null;
 
