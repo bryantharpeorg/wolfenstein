@@ -45,6 +45,11 @@ async function run(): Promise<void> {
 
   attachErrorHandlers(diag);
 
+  if ((window as unknown as Record<string, unknown>).__smokeThrow === true) {
+    console.error('deliberate startup exception for smoke self-test');
+    throw new Error('deliberate startup exception for smoke self-test');
+  }
+
   const overlay = createPerfOverlay();
   installToggle(overlay);
 
