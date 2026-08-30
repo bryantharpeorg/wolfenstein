@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { validateLevel } from '../../src/level-validate';
-import { LEVEL_GRID, GRID_SIZE, PLAYER_SPAWN } from '../../src/level';
+import { LEVEL_GRID, GRID_SIZE, PLAYER_SPAWN, ENEMY_SPAWNS, ITEM_SPAWNS } from '../../src/level';
 
 function cloneGrid(): string[] {
   return LEVEL_GRID.map((row) => row);
@@ -107,6 +107,29 @@ describe('validateLevel', () => {
     setCell(grid, PLAYER_SPAWN.x, PLAYER_SPAWN.z, '1');
     const report = validateLevel(grid);
     expect(report.errors.some((e) => e.category === 'spawn')).toBe(true);
+  });
+
+  it('reports a spawn error for an enemy or item spawn on a non-empty tile', () => {
+    const grid = cloneGrid();
+    const enemy = ENEMY_SPAWNS[0]!;
+    const item = ITEM_SPAWNS[0]!;
+    setCell(grid, enemy.x, enemy.z, '1');
+    setCell(grid, item.x, item.z, '1');
+    const report = validateLevel(grid);
+    const spawnErrors = report.errors.filter((e) => e.category === 'spawn');
+    expect(spawnErrors.length).toBeGreaterThanOrEqual(2);
+    const messages = spawnErrors.map((e) => e.message).join(' ');
+    expect(messages).toContain(`(${enemy.x},${enemy.z})`);
+    expect(messages).toContain(`(${item.x},${item.z})`);
+  });
+
+  it('reports a lock error for a door with no lock-table entry', () => {
+    const grid = cloneGrid();
+    // (21,31) is an open doorway in the brick wall; turning it into a door
+    // keeps valid wall-adjacency but has no entry in the shipped lock table.
+    setCell(grid, 21, 31, 'D');
+    const report = validateLevel(grid);
+    expect(report.errors.some((e) => e.category === 'lock')).toBe(true);
   });
 
   it('reports a material error for a wall type ID with no material entry', () => {
