@@ -61,7 +61,8 @@ interpolated position at named times, dwell timing, and every refusal reason bel
    further input, **Then** state becomes `closing`, and after the travel duration it is
    `closed` with progress 0.
 5. **Given** a door in `opening` or `closing`, **When** the interact command is issued,
-   **Then** the outcome is `blocked-moving` and the state and progress are unchanged —
+   **Then** the outcome is that state's moving refusal — `blocked-moving` when `opening`,
+   `refusing-closing` when `closing` (S6) — and the state and progress are unchanged:
    a moving door does not reverse or re-trigger.
 6. **Given** a door in `closing`, **When** the interact command is issued, **Then** the
    outcome is `refusing-closing` and the door completes its close; it cannot be
@@ -210,7 +211,7 @@ and assert the counter is unchanged.
   seconds toward a declared travel duration, such that stepping equal total time at any
   delta size yields identical final progress within 1e-6; per-frame deltas MUST be
   clamped to a declared maximum.
-- **FR-003**: A door in `opening` or `closing` SHALL reject the interact command with the
+- **FR-003**: A door in `opening` SHALL reject the interact command with the
   outcome `blocked-moving`, leaving state and progress unchanged, and a door in `closing`
   SHALL report `refusing-closing` rather than re-opening until it reaches `closed`.
 - **FR-004**: A door that reaches fully open SHALL remain open for a declared dwell time
