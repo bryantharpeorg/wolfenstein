@@ -26,17 +26,19 @@ function doorInState(state: 'opening' | 'open' | 'closing'): Door {
 }
 
 describe('a moving door refuses the interact command (US1-S5, FR-003)', () => {
-  // US1-S5 names both moving states, so both are asserted here: the refusal, and
-  // the untouched state and progress. Which name the refusal carries is US1-S6's
-  // subject and is asserted separately below.
+  // S5 names both moving states and the refusal each one answers with:
+  // `blocked-moving` when opening, `refusing-closing` when closing (S6).
+  const NAMES = { opening: 'blocked-moving', closing: 'refusing-closing' } as const;
+
   for (const state of ['opening', 'closing'] as const) {
-    it(`refuses a door in ${state}, leaving state and progress untouched`, () => {
+    it(`refuses a door in ${state} with ${NAMES[state]}, leaving it untouched`, () => {
       const door = doorInState(state);
       if (state === 'closing') advance(door, DOOR_TRAVEL_MS / 2);
       const before = door.progress;
       expect(door.state).toBe(state);
 
       const outcome = interactDoor(door);
+      expect(outcome).toBe(NAMES[state]);
       expect(isMovingRefusal(outcome)).toBe(true);
       expect(door.state).toBe(state);
       expect(door.progress).toBe(before);
@@ -56,11 +58,6 @@ describe('a moving door refuses the interact command (US1-S5, FR-003)', () => {
       expect(door.progress).toBe(state === 'opening' ? 1 : 0);
     });
   }
-
-  it('names the opening case blocked-moving and the closing case refusing-closing', () => {
-    expect(interactDoor(doorInState('opening'))).toBe('blocked-moving');
-    expect(interactDoor(doorInState('closing'))).toBe('refusing-closing');
-  });
 });
 
 describe('a closing door refuses until it is closed (US1-S6, FR-003)', () => {
