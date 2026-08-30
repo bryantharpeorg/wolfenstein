@@ -60,12 +60,10 @@ async function run() {
   installToggle(overlay);
 
   let renderer: Renderer;
-  let usedBackend = selected;
   try {
     const result = await makeRenderer();
     renderer = result.renderer;
-    usedBackend = result.usedBackend;
-    diag.renderer = usedBackend;
+    diag.renderer = result.usedBackend;
     diag.fallbackReason = result.fallbackReason;
   } catch (error) {
     if (isRendererFailure(error)) {
@@ -105,13 +103,13 @@ async function run() {
 
     renderer.render(empty.scene, empty.camera);
 
+    const info = renderer.info.render;
     diag.drawCalls =
-      'drawCalls' in renderer.info.render
-        ? (renderer.info.render as { drawCalls: number }).drawCalls
-        : renderer.info.render.calls;
+      'drawCalls' in info
+        ? (info as { drawCalls: number }).drawCalls
+        : (info as { calls: number }).calls;
     recordFrame(diag, delta);
     overlay.update(diag);
-    diag.ready = true;
 
     requestAnimationFrame(frame);
   }
