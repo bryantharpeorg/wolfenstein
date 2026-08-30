@@ -32,7 +32,22 @@ function resolveBrowserExecutable() {
   if (CHROME_PATH != null) {
     return CHROME_PATH;
   }
-  return chromium.executablePath();
+  const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (browsersPath != null) {
+    const chromiumRoot = resolve(browsersPath, 'chromium-1234', 'chrome-linux64', 'chrome');
+    if (existsSync(chromiumRoot)) {
+      return chromiumRoot;
+    }
+  }
+  try {
+    return chromium.executablePath();
+  } catch (err) {
+    fail(
+      `Chromium executable not found. ` +
+        `Set CHROME_PATH to a chrome binary or PLAYWRIGHT_BROWSERS_PATH to a browsers directory.`,
+      [err instanceof Error ? err.message : String(err)],
+    );
+  }
 }
 
 function checkBrowser() {
