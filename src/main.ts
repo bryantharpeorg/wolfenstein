@@ -1,7 +1,7 @@
 import { selectBackend } from './renderer/select';
 import { createRenderer, isRendererFailure } from './renderer/create';
 import { buildEmptyScene, resizeCamera } from './scene/empty';
-import { createDiagnostics, updateFps } from './diag/diag';
+import { createDiagnostics, recordFrame } from './diag/diag';
 import { createPerfOverlay, installToggle } from './overlay/perf';
 import type { WebGLRenderer } from 'three/src/renderers/WebGLRenderer.js';
 import type WebGPURenderer from 'three/src/renderers/webgpu/WebGPURenderer.js';
@@ -115,7 +115,7 @@ async function run() {
       'drawCalls' in renderer.info.render
         ? (renderer.info.render as { drawCalls: number }).drawCalls
         : renderer.info.render.calls;
-    updateFps(diag, delta);
+    recordFrame(diag, delta);
     overlay.update(diag);
     diag.ready = true;
 
