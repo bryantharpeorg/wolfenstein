@@ -33,8 +33,5 @@ playwright-report/
 .env
 .env.*
 
-# Lockfiles are not part of the authored source; npm recreates them on install.
-package-lock.json
-
 # Ergane runtime root: worktrees, session transcripts, verification evidence.
 .ergane/
