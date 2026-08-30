@@ -1,9 +1,17 @@
+/**
+ * Bootstrap only. Behaviour lives in `src/systems/<name>/register.ts`.
+ *
+ * This file used to wire every subsystem by hand, which made it the one file every
+ * story had to edit. See `boot/registry.ts` for why that matters. Adding behaviour
+ * here is the thing this arrangement exists to prevent: add a system instead.
+ */
 import { selectBackend } from './renderer/select';
 import { createRenderer, isRendererFailure } from './renderer/create';
-import { buildEmptyScene, resizeCamera } from './scene/empty';
-import { createDiagnostics, recordFrame } from './diag/diag';
+import { createSceneShell, resizeCamera } from './scene/empty';
+import { createDiagnostics } from './diag/diag';
 import { installErrorHandlers } from './diag/handlers';
-import { createPerfOverlay, installToggle } from './overlay/perf';
+import { collectSystems, type GameContext } from './boot/registry';
+import './boot/discover';
 import type { WebGLRenderer } from 'three/src/renderers/WebGLRenderer.js';
 import type WebGPURenderer from 'three/src/renderers/webgpu/WebGPURenderer.js';
 
@@ -56,16 +64,13 @@ async function run() {
     throw new Error(injectMessage);
   }
 
-  // Defer overlay creation until after the early-exit checks so a fatal startup
-  // error does not leave a partially-initialised overlay behind.
-  const overlay = createPerfOverlay();
-  installToggle(overlay);
-
   let renderer: Renderer;
+  let usedBackend: 'webgpu' | 'webgl' = selected;
   try {
     const result = await makeRenderer();
     renderer = result.renderer;
-    diag.renderer = result.usedBackend;
+    usedBackend = result.usedBackend;
+    diag.renderer = usedBackend;
     diag.fallbackReason = result.fallbackReason;
   } catch (error) {
     if (isRendererFailure(error)) {
@@ -80,14 +85,30 @@ async function run() {
     return;
   }
 
-  const empty = buildEmptyScene();
-  resizeCamera(empty.camera);
+  const shell = createSceneShell();
+  resizeCamera(shell.camera);
+
+  const ctx: GameContext = {
+    scene: shell.scene,
+    camera: shell.camera,
+    diag,
+    backend: usedBackend,
+    renderer,
+  };
+
+  const systems = collectSystems();
+  for (const system of systems) {
+    system.setup?.(ctx);
+  }
 
   function resize() {
     const width = window.innerWidth;
     const height = window.innerHeight;
     renderer.setSize(width, height, false);
-    resizeCamera(empty.camera);
+    resizeCamera(shell.camera);
+    for (const system of systems) {
+      system.resize?.(ctx, width, height);
+    }
   }
 
   window.addEventListener('resize', resize);
@@ -99,19 +120,11 @@ async function run() {
     const delta = now - lastTime;
     lastTime = now;
 
-    const cube = empty.meshes[0]!;
-    cube.rotation.x += 0.01;
-    cube.rotation.y += 0.01;
+    for (const system of systems) {
+      system.update?.(ctx, delta);
+    }
 
-    renderer.render(empty.scene, empty.camera);
-
-    const info = renderer.info.render;
-    diag.drawCalls =
-      'drawCalls' in info
-        ? (info as { drawCalls: number }).drawCalls
-        : (info as { calls: number }).calls;
-    recordFrame(diag, delta);
-    overlay.update(diag);
+    renderer.render(shell.scene, shell.camera);
 
     requestAnimationFrame(frame);
   }
@@ -120,9 +133,3 @@ async function run() {
 }
 
 run();
-
-declare global {
-  interface Window {
-    __diag: import('./diag/diag').Diagnostics;
-  }
-}
