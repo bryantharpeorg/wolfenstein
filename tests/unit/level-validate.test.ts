@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { validateLevel } from '../../src/level-validate';
+import { buildLevelGeometry, LevelBuildError } from '../../src/geometry/build';
 import { LEVEL_GRID, GRID_SIZE, PLAYER_SPAWN, ENEMY_SPAWNS, ITEM_SPAWNS } from '../../src/level';
 
 function cloneGrid(): string[] {
@@ -148,5 +149,24 @@ describe('validateLevel', () => {
     setCell(grid, 55, 55, 'E');
     const report = validateLevel(grid);
     expect(report.errors.some((e) => e.category === 'reachability')).toBe(true);
+  });
+
+  it('builds geometry without throwing for the valid shipped layout', () => {
+    expect(() => buildLevelGeometry()).not.toThrow();
+  });
+
+  it('throws from geometry building for a grid with zero E cells', () => {
+    const grid = cloneGrid();
+    const exit = findExit(grid);
+    expect(exit).not.toBeNull();
+    setCell(grid, exit!.x, exit!.z, '0');
+    expect(() => buildLevelGeometry(grid)).toThrow(LevelBuildError);
+    try {
+      buildLevelGeometry(grid);
+    } catch (error) {
+      expect(error).toBeInstanceOf(LevelBuildError);
+      const report = (error as LevelBuildError).report;
+      expect(report.errors.some((e) => e.category === 'exit')).toBe(true);
+    }
   });
 });
