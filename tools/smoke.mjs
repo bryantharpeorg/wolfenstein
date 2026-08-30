@@ -500,6 +500,164 @@ async function runPlayerWalkPass(browser, url, grid) {
   return errors;
 }
 
+// Walks the shipped level to a locked door and presses interact, so US2's refusal
+// is observed on the running page rather than only in vitest: the reason and the
+// *named* key reach `__diag.interaction`, the key is then collected on its own
+// tile, the same door opens, and the key is still in the inventory (US2-S8).
+async function runLockedDoorPass(browser, url) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (error) => {
+    errors.push(`pageerror: ${error.message}`);
+  });
+
+  await page.goto(url, { waitUntil: 'load' });
+
+  // The scripted drive, shared by every leg of the route below. Declared as a
+  // string because it is installed in the page, not run in node.
+  const installDrive = () => {
+    window.__smokeWalkTo = (targetX, targetZ) => {
+      const SPEED = 4;
+      for (let step = 0; step < 400; step += 1) {
+        // `__diag.player` is a live object, so the previous position has to be
+        // read out as numbers or the no-progress check compares a value to itself.
+        const fromX = window.__diag.player.x;
+        const fromZ = window.__diag.player.z;
+        const dx = targetX - fromX;
+        const dz = targetZ - fromZ;
+        const distance = Math.hypot(dx, dz);
+        if (distance < 0.05) break;
+        window.__playerDrive((SPEED * dx) / distance, (SPEED * dz) / distance, 50);
+        const moved = Math.hypot(window.__diag.player.x - fromX, window.__diag.player.z - fromZ);
+        if (moved < 1e-4) break;
+      }
+      return { x: window.__diag.player.x, z: window.__diag.player.z };
+    };
+    window.__smokeInteract = () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    };
+  };
+
+  try {
+    await page.waitForFunction(
+      () =>
+        window.__diag != null &&
+        window.__diag.ready === true &&
+        window.__diag.player != null &&
+        window.__diag.interaction != null &&
+        typeof window.__playerDrive === 'function',
+      { timeout: 15000 },
+    );
+  } catch (timeoutError) {
+    errors.push(
+      `__diag.interaction / __playerDrive did not become available within 15 seconds (${
+        timeoutError instanceof Error ? timeoutError.message : String(timeoutError)
+      })`,
+    );
+    await context.close();
+    return errors;
+  }
+
+  await page.evaluate(installDrive);
+
+  // Leg 1: south to the unlocked door at (10,21), open it, walk through.
+  await page.evaluate(() => {
+    window.__smokeWalkTo(10.5, 20.5);
+    window.__smokeInteract();
+  });
+  try {
+    await page.waitForFunction(() => window.__diag.interaction.doorsOpen >= 1, { timeout: 15000 });
+  } catch {
+    const reason = await page.evaluate(() => window.__diag.interaction.lastReason);
+    errors.push(`no door opened after the interact command (lastReason=${reason})`);
+    await context.close();
+    return errors;
+  }
+
+  // Leg 2: through the doorway, east along row 31, up to the silver-locked door.
+  const atDoor = await page.evaluate(() => {
+    window.__smokeWalkTo(10.5, 31.5);
+    return window.__smokeWalkTo(41.5, 31.5);
+  });
+  if (Math.abs(atDoor.x - 41.5) > 0.75 || Math.abs(atDoor.z - 31.5) > 0.75) {
+    errors.push(
+      `walk to the locked door ended at (${atDoor.x.toFixed(2)}, ${atDoor.z.toFixed(2)}), not beside it`,
+    );
+    await context.close();
+    return errors;
+  }
+
+  // The refusal: named reason, named key, and no key spent to learn it.
+  await page.evaluate(() => window.__smokeInteract());
+  try {
+    await page.waitForFunction(
+      () => window.__diag.interaction.lastRefusalKeyKind != null,
+      { timeout: 5000 },
+    );
+  } catch {
+    // Fall through to the assertions below, which report what was actually read.
+  }
+  const refused = await page.evaluate(() => ({ ...window.__diag.interaction }));
+  if (refused.lastReason !== 'locked-missing-key') {
+    errors.push(`__diag.interaction.lastReason is ${refused.lastReason}, not locked-missing-key`);
+  }
+  if (refused.lastRefusalKeyKind !== 'silver') {
+    errors.push(
+      `__diag.interaction.lastRefusalKeyKind is ${refused.lastRefusalKeyKind}, not silver`,
+    );
+  }
+  if (refused.keys == null || refused.keys.silver !== 0) {
+    errors.push(`__diag.interaction.keys.silver is ${refused.keys?.silver}, not 0 before pickup`);
+  }
+
+  // The silver key lies one room west, on the spawn side of its own door.
+  await page.evaluate(() => {
+    window.__smokeWalkTo(30.5, 31.5);
+    window.__smokeWalkTo(30.5, 30.5);
+  });
+  try {
+    await page.waitForFunction(() => window.__diag.interaction.keys.silver === 1, { timeout: 5000 });
+  } catch {
+    const keys = await page.evaluate(() => JSON.stringify(window.__diag.interaction.keys));
+    errors.push(`silver key was not collected on its tile: keys=${keys}`);
+    await context.close();
+    return errors;
+  }
+
+  // The same door, the same press, the other outcome - and the key stays.
+  await page.evaluate(() => {
+    window.__smokeWalkTo(30.5, 31.5);
+    window.__smokeWalkTo(41.5, 31.5);
+    window.__smokeInteract();
+  });
+  try {
+    await page.waitForFunction(() => window.__diag.interaction.lastReason === 'opened', {
+      timeout: 5000,
+    });
+  } catch {
+    // Reported by the assertions below.
+  }
+  const opened = await page.evaluate(() => ({ ...window.__diag.interaction }));
+  if (opened.lastReason !== 'opened') {
+    errors.push(`the locked door did not open with its key: lastReason=${opened.lastReason}`);
+  }
+  if (opened.keys == null || opened.keys.silver !== 1) {
+    errors.push(`the silver key did not survive the unlock: keys.silver=${opened.keys?.silver}`);
+  }
+  if (opened.keyConsumed !== false) {
+    errors.push(`__diag.interaction.keyConsumed is ${opened.keyConsumed}, not false`);
+  }
+  if (opened.lastRefusalKeyKind !== null) {
+    errors.push(
+      `__diag.interaction.lastRefusalKeyKind is ${opened.lastRefusalKeyKind} after a success, not null`,
+    );
+  }
+
+  await context.close();
+  return errors;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const injectError = args.includes('--inject-error');
@@ -580,6 +738,15 @@ async function main() {
       fail('Player walk smoke pass failed');
     }
     console.log('Player walk smoke pass: 200 tiles walked, all positions walkable, not stuck');
+
+    const lockedDoor = await runLockedDoorPass(browser, url);
+    if (lockedDoor.length > 0) {
+      for (const error of lockedDoor) {
+        console.error(error);
+      }
+      fail('Locked door smoke pass failed');
+    }
+    console.log('Locked door smoke pass: refused by name, then opened with the key it named');
 
     const noGpu = await runSmokePass(
       browser,
