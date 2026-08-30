@@ -1,5 +1,6 @@
 import { WebGLRenderer } from 'three';
 import WebGPURenderer from 'three/src/renderers/webgpu/WebGPURenderer.js';
+import WebGPU from 'three/examples/jsm/capabilities/WebGPU.js';
 import { RendererBackend } from './select';
 
 export interface RendererFailure {
@@ -33,8 +34,12 @@ function makeParams(canvas: HTMLCanvasElement) {
   return { canvas, antialias: true, alpha: false };
 }
 
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function makeFailure(backend: RendererBackend, error: unknown): never {
-  const reason = error instanceof Error ? error.message : String(error);
+  const reason = describeError(error);
   const failure: RendererFailure = { backend, reason };
   throw failure;
 }
@@ -46,23 +51,35 @@ export async function createRenderer(
   const requested = options.backend;
 
   if (requested === 'webgpu') {
-    try {
-      const renderer = new WebGPURenderer(makeParams(canvas));
-      const usedBackend: RendererBackend = 'webgpu';
-      return { renderer, usedBackend, fallbackReason: null };
-    } catch (error) {
+    // If the adapter cannot be obtained, fall back to WebGL before constructing the
+    // WebGPU renderer so the page reports the fallback cleanly rather than logging a
+    // warning and rendering through a hidden WebGL backend.
+    if (!WebGPU.isAvailable()) {
+      const reason = 'WebGPU adapter request failed';
       try {
-        const fallback = new WebGLRenderer(makeParams(canvas));
-        return {
-          renderer: fallback,
-          usedBackend: 'webgl',
-          fallbackReason:
-            error instanceof Error ? error.message : String(error),
-        };
+        const renderer = new WebGLRenderer(makeParams(canvas));
+        return { renderer, usedBackend: 'webgl', fallbackReason: reason };
       } catch (fallbackError) {
         makeFailure(
           'webgl',
-          `WebGPU failed (${String(error)}); WebGL fallback also failed (${String(fallbackError)})`,
+          `${reason}; WebGL fallback also failed: ${describeError(fallbackError)}`,
+        );
+      }
+    }
+
+    try {
+      const renderer = new WebGPURenderer(makeParams(canvas));
+      await renderer.init();
+      return { renderer, usedBackend: 'webgpu', fallbackReason: null };
+    } catch (error) {
+      const reason = describeError(error);
+      try {
+        const fallback = new WebGLRenderer(makeParams(canvas));
+        return { renderer: fallback, usedBackend: 'webgl', fallbackReason: reason };
+      } catch (fallbackError) {
+        makeFailure(
+          'webgl',
+          `WebGPU failed (${reason}); WebGL fallback also failed: ${describeError(fallbackError)}`,
         );
       }
     }
