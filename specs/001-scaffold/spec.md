@@ -1,3 +1,7 @@
+---
+state: ready
+---
+
 # Feature Specification: Project Scaffold and Render Harness
 
 **Feature Branch**: `001-scaffold`
