@@ -62,8 +62,3 @@ export function collectKeyPickupAt(
   const pickup = keyPickupAt(pickups, x, z);
   return pickup == null ? NOTHING : collectKeyPickup(pickup, inventory);
 }
-
-/** The pickups still on the floor, for the render layer's mesh bookkeeping. */
-export function remainingKeyPickups(pickups: readonly KeyPickup[]): KeyPickup[] {
-  return pickups.filter((pickup) => !pickup.consumed);
-}
