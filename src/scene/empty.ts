@@ -1,20 +1,20 @@
-import {
-  Scene,
-  PerspectiveCamera,
-  BoxGeometry,
-  MeshStandardMaterial,
-  Mesh,
-  AmbientLight,
-  DirectionalLight,
-} from 'three';
+/**
+ * The scene SHELL: a scene and a camera, with no content in them.
+ *
+ * Content used to be built here and wired in `main.ts`, which meant replacing the
+ * placeholder scene required editing `main.ts` — the shared file this arrangement
+ * exists to keep stories out of. Lights and meshes now come from systems
+ * (`src/systems/<name>/register.ts`), so 002 adds level geometry by adding a directory
+ * and removes the placeholder by deleting one.
+ */
+import { Scene, PerspectiveCamera } from 'three';
 
-export interface EmptyScene {
+export interface SceneShell {
   scene: Scene;
   camera: PerspectiveCamera;
-  meshes: Mesh[];
 }
 
-export function buildEmptyScene(): EmptyScene {
+export function createSceneShell(): SceneShell {
   const scene = new Scene();
   scene.background = null;
 
@@ -27,22 +27,10 @@ export function buildEmptyScene(): EmptyScene {
   camera.position.set(0, 0, 3);
   camera.lookAt(0, 0, 0);
 
-  const geometry = new BoxGeometry(1, 1, 1);
-  const material = new MeshStandardMaterial({ color: 0x808080 });
-  const cube = new Mesh(geometry, material);
-  cube.position.set(0, 0, 0);
-  scene.add(cube);
-
-  scene.add(new AmbientLight(0x404040, 1));
-  const keyLight = new DirectionalLight(0xffffff, 2);
-  keyLight.position.set(2, 4, 5);
-  scene.add(keyLight);
-
-  return { scene, camera, meshes: [cube] };
+  return { scene, camera };
 }
 
 export function resizeCamera(camera: PerspectiveCamera): void {
   camera.aspect = window.innerWidth / Math.max(1, window.innerHeight);
   camera.updateProjectionMatrix();
 }
-

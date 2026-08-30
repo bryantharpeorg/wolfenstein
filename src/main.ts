@@ -1,8 +1,17 @@
+/**
+ * Bootstrap only. Behaviour lives in `src/systems/<name>/register.ts`.
+ *
+ * This file used to wire every subsystem by hand, which made it the one file every
+ * story had to edit — us1, us2 and us3 of 001-scaffold all touched it. See
+ * `boot/registry.ts` for why that matters. Adding behaviour here is the thing this
+ * arrangement exists to prevent: add a system instead.
+ */
 import { selectBackend } from './renderer/select';
 import { createRenderer, isRendererFailure } from './renderer/create';
-import { buildEmptyScene, resizeCamera } from './scene/empty';
-import { createDiagnostics, updateFps } from './diag/diag';
-import { createPerfOverlay, installToggle } from './overlay/perf';
+import { createSceneShell, resizeCamera } from './scene/empty';
+import { createDiagnostics } from './diag/diag';
+import { collectSystems, type GameContext } from './boot/registry';
+import './boot/discover';
 import type { WebGLRenderer } from 'three/src/renderers/WebGLRenderer.js';
 import type WebGPURenderer from 'three/src/renderers/webgpu/WebGPURenderer.js';
 
@@ -62,9 +71,6 @@ async function run() {
   const diag = createDiagnostics(selected);
   window.__diag = diag;
 
-  const overlay = createPerfOverlay();
-  installToggle(overlay);
-
   let renderer: Renderer;
   let usedBackend = selected;
   try {
@@ -86,14 +92,30 @@ async function run() {
     return;
   }
 
-  const empty = buildEmptyScene();
-  resizeCamera(empty.camera);
+  const shell = createSceneShell();
+  resizeCamera(shell.camera);
+
+  const ctx: GameContext = {
+    scene: shell.scene,
+    camera: shell.camera,
+    diag,
+    backend: usedBackend,
+    renderer,
+  };
+
+  const systems = collectSystems();
+  for (const system of systems) {
+    system.setup?.(ctx);
+  }
 
   function resize() {
     const width = window.innerWidth;
     const height = window.innerHeight;
     renderer.setSize(width, height, false);
-    resizeCamera(empty.camera);
+    resizeCamera(shell.camera);
+    for (const system of systems) {
+      system.resize?.(ctx, width, height);
+    }
   }
 
   window.addEventListener('resize', resize);
@@ -105,19 +127,11 @@ async function run() {
     const delta = now - lastTime;
     lastTime = now;
 
-    const cube = empty.meshes[0]!;
-    cube.rotation.x += 0.01;
-    cube.rotation.y += 0.01;
+    for (const system of systems) {
+      system.update?.(ctx, delta);
+    }
 
-    renderer.render(empty.scene, empty.camera);
-
-    diag.drawCalls =
-      'drawCalls' in renderer.info.render
-        ? (renderer.info.render as { drawCalls: number }).drawCalls
-        : renderer.info.render.calls;
-    updateFps(diag, delta);
-    overlay.update(diag);
-    diag.ready = true;
+    renderer.render(shell.scene, shell.camera);
 
     requestAnimationFrame(frame);
   }

@@ -47,7 +47,18 @@ export function walkAndReport(root) {
     for (const entry of entries) {
       const full = join(current, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.git') {
+        // `.ergane`/`.factory` are the factory's runtime root: node worktrees, agent
+        // HOMEs and npm caches. Nothing in there is authored content, and the caches
+        // hold fonts and images that would read as constitution II violations. Today
+        // they sit under `node_modules` and are skipped by accident; that is luck, not
+        // a rule.
+        if (
+          entry.name === 'node_modules' ||
+          entry.name === 'dist' ||
+          entry.name === '.git' ||
+          entry.name === '.ergane' ||
+          entry.name === '.factory'
+        ) {
           continue;
         }
         queue.push(full);
