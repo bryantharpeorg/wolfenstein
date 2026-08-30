@@ -56,6 +56,8 @@ async function run() {
     throw new Error(injectMessage);
   }
 
+  // Defer overlay creation until after the early-exit checks so a fatal startup
+  // error does not leave a partially-initialised overlay behind.
   const overlay = createPerfOverlay();
   installToggle(overlay);
 
