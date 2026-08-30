@@ -14,8 +14,8 @@ export interface Aabb {
 
 const CRUSH_EPSILON = 1e-9;
 
-/** The volume the leaf sweeps as it closes: its tile, plus the part of the recess
- * it still fills. A player anywhere inside is in the leaf's way. */
+/** The volume the leaf sweeps as it closes: its tile plus the part of the recess
+ * it still fills. A player anywhere inside is in its way. */
 export function doorTravelVolume(door: Door): Aabb {
   const retracted = door.progress * DOOR_TRAVEL_TILES * door.direction;
   if (door.axis === 'x') {
@@ -38,22 +38,19 @@ function clamp(value: number, low: number, high: number): number {
   return value < low ? low : value > high ? high : value;
 }
 
-/** Whether a capsule of `radius` at (playerX, playerZ) overlaps the travel
- * volume. A centre inside the box always counts, whatever the radius. */
+/** Whether a capsule of `radius` at (playerX, playerZ) overlaps that volume. A
+ * centre inside the box always counts, whatever the radius. */
 export function doorWouldCrush(door: Door, playerX: number, playerZ: number, radius: number): boolean {
   const volume = doorTravelVolume(door);
-  const nearestX = clamp(playerX, volume.minX, volume.maxX);
-  const nearestZ = clamp(playerZ, volume.minZ, volume.maxZ);
-  const dx = playerX - nearestX;
-  const dz = playerZ - nearestZ;
+  const dx = playerX - clamp(playerX, volume.minX, volume.maxX);
+  const dz = playerZ - clamp(playerZ, volume.minZ, volume.maxZ);
   const distanceSq = dx * dx + dz * dz;
-  if (distanceSq === 0) return true;
-  return distanceSq < radius * radius - CRUSH_EPSILON;
+  return distanceSq === 0 || distanceSq < radius * radius - CRUSH_EPSILON;
 }
 
 /** The gate the render layer registers (FR-015), the live player crossing the DOM
- * line as a closure. It answers the `close` phase only: standing in a doorway
- * stops a door closing on you, never stops it opening. */
+ * line as a closure. `close` phase only: standing in a doorway stops a door
+ * closing on you, never stops it opening. */
 export function createCrushGate(readPlayer: () => PlayerCapsule | null): DoorGate {
   return ({ door, phase }) => {
     if (phase !== 'close') return null;

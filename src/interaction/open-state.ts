@@ -16,9 +16,7 @@ export function registerOpenTileProvider(provider: OpenTileProvider): void {
 export function openTiles(): Set<string> {
   const tiles = new Set<string>();
   for (const provider of providers) {
-    for (const key of provider()) {
-      tiles.add(key);
-    }
+    for (const key of provider()) tiles.add(key);
   }
   return tiles;
 }

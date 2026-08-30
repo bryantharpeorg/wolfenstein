@@ -1,7 +1,7 @@
-// Refusal gates, mirroring `src/boot/registry.ts` (FR-006, FR-015). A gate is
-// asked before a door opens and again before it closes, returning a declared
-// outcome to refuse or null to allow. US2's lock check and the render layer's
-// crush gate both register from their own files, so `door.ts` is written once.
+// Refusal gates, mirroring `src/boot/registry.ts` (FR-006, FR-015): asked before
+// a door opens and again before it closes, returning a declared outcome to refuse
+// or null to allow. US2's lock check and the render layer's crush gate register
+// from their own files, so `door.ts` is written once and never reopened.
 
 import type { InteractOutcome } from './outcomes';
 import type { Door } from './door';
@@ -27,8 +27,7 @@ export function collectDoorGates(): readonly DoorGate[] {
   return gates;
 }
 
-/** The first refusal, or null when every gate allows. Kept here rather than in
- * `door.ts` so the iteration order has one owner. */
+/** The first refusal, or null when every gate allows. */
 export function firstRefusal(door: Door, phase: DoorGatePhase): InteractOutcome | null {
   for (const gate of gates) {
     const outcome = gate({ door, phase });

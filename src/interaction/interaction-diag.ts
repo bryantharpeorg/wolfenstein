@@ -1,7 +1,7 @@
 // The `window.__diag.interaction` shape (FR-017), attached to 001's Diagnostics
 // by module augmentation rather than by editing `src/diag/diag.ts`. The whole
 // field set is declared here, so US2 and US3 write through the setters below
-// rather than reopening this contract.
+// rather than reopening this contract. Pure: no DOM, no three.js.
 
 import type { Diagnostics } from '../diag/diag';
 import type { InteractOutcome } from './outcomes';
@@ -42,12 +42,9 @@ export function createInteractionDiagnostics(): InteractionDiagnostics {
   };
 }
 
-/** Attaches the complete FR-017 shape, zero-initialised. Idempotent, so three
- * systems can each ensure it without overwriting the others. */
+/** Zero-initialised and idempotent, so three systems can each ensure it. */
 export function ensureInteractionDiag(diag: Diagnostics): InteractionDiagnostics {
-  if (diag.interaction == null) {
-    diag.interaction = createInteractionDiagnostics();
-  }
+  diag.interaction ??= createInteractionDiagnostics();
   return diag.interaction;
 }
 

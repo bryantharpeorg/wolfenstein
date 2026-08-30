@@ -1,7 +1,7 @@
-// One door per `D` tile of 002's grid, with the travel axis its neighbours imply,
-// plus the two questions only the whole set can answer: which door is the player
-// next to, and would opening this one drive its leaf into another door's tile
-// (FR-006, FR-016). Pure; the grid arrives as an argument, so fixtures are testable.
+// One door per `D` tile of 002's grid, plus the two questions only the whole set
+// can answer: which door is the player next to, and would opening this one drive
+// its leaf into another door's tile (FR-006, FR-016). Pure; the grid arrives as
+// an argument, so a fixture grid is testable.
 
 import { LEVEL_GRID, DOOR_LOCKS } from '../level';
 import type { InteractOutcome } from './outcomes';
@@ -27,9 +27,7 @@ export interface InteractResolution {
 }
 
 function cellAt(grid: string[], x: number, z: number): string {
-  const row = grid[z];
-  if (row === undefined) return ' ';
-  return row[x] ?? ' ';
+  return grid[z]?.[x] ?? ' ';
 }
 
 function isWall(cell: string): boolean {
@@ -45,8 +43,8 @@ function tileKey(x: number, z: number): string {
   return `${x},${z}`;
 }
 
-// North-south wall: slides along z. East-west wall: along x. A fixture grid with
-// no clear pair is resolved by majority.
+// The leaf slides along the axis of the door's solid neighbours; a fixture grid
+// with no clear pair is resolved by majority.
 function resolveAxis(grid: string[], x: number, z: number): DoorAxis {
   const alongZ =
     (isBlocking(cellAt(grid, x, z - 1)) ? 1 : 0) + (isBlocking(cellAt(grid, x, z + 1)) ? 1 : 0);
@@ -59,7 +57,7 @@ function resolveAxis(grid: string[], x: number, z: number): DoorAxis {
 
 // Into a wall if one neighbour is a wall, positive when both are. A door whose
 // only blocking neighbour is another door retracts toward it and is then refused
-// by the neighbour rule rather than by a silent failure to open.
+// by the neighbour rule rather than failing to open in silence.
 function resolveDirection(grid: string[], x: number, z: number, axis: DoorAxis): DoorDirection {
   const negative = axis === 'x' ? cellAt(grid, x - 1, z) : cellAt(grid, x, z - 1);
   const positive = axis === 'x' ? cellAt(grid, x + 1, z) : cellAt(grid, x, z + 1);
@@ -102,16 +100,15 @@ export function neighbourConflict(field: DoorField, door: Door): Door | null {
   return null;
 }
 
-/** The door the player stands next to — their tile or one of its four orthogonal
- * neighbours — nearest first. Null is reported as `no-target` (FR-006). */
+/** The nearest door within reach — the player's tile or its four orthogonal
+ * neighbours. Null is reported as `no-target` (FR-006). */
 export function findTargetDoor(field: DoorField, playerX: number, playerZ: number): Door | null {
   const tileX = Math.floor(playerX);
   const tileZ = Math.floor(playerZ);
   let best: Door | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const door of field.doors) {
-    const manhattan = Math.abs(door.x - tileX) + Math.abs(door.z - tileZ);
-    if (manhattan > INTERACT_REACH_TILES) continue;
+    if (Math.abs(door.x - tileX) + Math.abs(door.z - tileZ) > INTERACT_REACH_TILES) continue;
     const dx = door.x + 0.5 - playerX;
     const dz = door.z + 0.5 - playerZ;
     const distance = dx * dx + dz * dz;
@@ -124,8 +121,7 @@ export function findTargetDoor(field: DoorField, playerX: number, playerZ: numbe
 }
 
 /** Resolves one interact command against the field: the neighbour rule applies
- * here, the rest is the door's own machine, and the result is always a declared
- * outcome (FR-006). */
+ * here, the rest is the door's own machine (FR-006). */
 export function interactWithDoors(field: DoorField, playerX: number, playerZ: number): InteractResolution {
   const door = findTargetDoor(field, playerX, playerZ);
   if (door == null) return { outcome: 'no-target', door: null };
@@ -136,9 +132,7 @@ export function interactWithDoors(field: DoorField, playerX: number, playerZ: nu
 }
 
 export function openDoorTiles(field: DoorField): string[] {
-  return field.doors
-    .filter((door) => isDoorPassable(door))
-    .map((door) => tileKey(door.x, door.z));
+  return field.doors.filter(isDoorPassable).map((door) => tileKey(door.x, door.z));
 }
 
 export { doorDestinationTile };

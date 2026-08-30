@@ -1,6 +1,6 @@
 // The door state machine — `closed`, `opening`, `open`, `closing` — advanced by
 // accumulated milliseconds, never by frame count (FR-001, FR-002). Pure: no DOM,
-// no three.js; the player position arrives as an argument or through a gate.
+// no three.js; the player arrives as an argument or through a gate.
 
 import type { LockKind } from '../level';
 import type { InteractOutcome } from './outcomes';
@@ -15,6 +15,7 @@ export type DoorState = (typeof DOOR_STATES)[number];
 
 /** The axis the leaf slides along: that of the door's two solid neighbours. */
 export type DoorAxis = 'x' | 'z';
+
 
 export type DoorDirection = 1 | -1;
 
@@ -50,8 +51,8 @@ export interface PlayerCapsule {
   radius: number;
 }
 
+/** The player capsule, when the caller has one, for the crush test (FR-015). */
 export interface DoorStepOptions {
-  /** The player capsule, when the caller has one, for the crush test (FR-015). */
   player?: PlayerCapsule | null;
 }
 
@@ -88,7 +89,7 @@ export function isDoorPassable(door: Door): boolean {
 }
 
 // The capsule handed in is checked directly, so a test needs no registry; the
-// gates are asked too, so the render layer supplies the live player (FR-015).
+// gates are asked too, so the render layer can supply a live player (FR-015).
 function closeRefusal(door: Door, player: PlayerCapsule | null | undefined): InteractOutcome | null {
   if (player != null && doorWouldCrush(door, player.x, player.z, player.radius)) {
     return 'crush-reversed';
@@ -96,9 +97,22 @@ function closeRefusal(door: Door, player: PlayerCapsule | null | undefined): Int
   return firstRefusal(door, 'close');
 }
 
-// One clamped delta can carry a door across several transitions, so integration
-// is a residual loop. The cap is a backstop against a pathological cycle.
+// A clamped delta can carry a door across several transitions, so integration is
+// a residual loop; the cap is a backstop against a pathological cycle.
 const MAX_TRANSITIONS_PER_STEP = 32;
+
+// Travel toward `target` (1 open, 0 closed), returning the unspent remainder.
+function travel(door: Door, remaining: number, target: 0 | 1): number {
+  const needed = Math.abs(target - door.progress) * DOOR_TRAVEL_MS;
+  if (remaining < needed) {
+    door.progress += (target === 1 ? remaining : -remaining) / DOOR_TRAVEL_MS;
+    return 0;
+  }
+  door.progress = target;
+  door.state = target === 1 ? 'open' : 'closed';
+  door.dwellMs = 0;
+  return remaining - needed;
+}
 
 /** Advances a door by `deltaMs` (FR-002): the delta is clamped to `MAX_STEP_MS`,
  * then consumed one state at a time, so no transition is skipped (US1-S8). */
@@ -112,16 +126,7 @@ export function stepDoor(door: Door, deltaMs: number, options: DoorStepOptions =
     if (door.state === 'closed') break;
 
     if (door.state === 'opening') {
-      const needed = (1 - door.progress) * DOOR_TRAVEL_MS;
-      if (remaining < needed) {
-        door.progress += remaining / DOOR_TRAVEL_MS;
-        remaining = 0;
-      } else {
-        door.progress = 1;
-        door.state = 'open';
-        door.dwellMs = 0;
-        remaining -= needed;
-      }
+      remaining = travel(door, remaining, 1);
       continue;
     }
 
@@ -138,50 +143,38 @@ export function stepDoor(door: Door, deltaMs: number, options: DoorStepOptions =
       continue;
     }
 
-    // 'closing': the leaf may not travel into the player (FR-015).
+    // 'closing': the leaf may not travel into the player (FR-015). Any other
+    // close-phase refusal holds the leaf where it is for the rest of this step.
     const refusal = closeRefusal(door, options.player);
     if (refusal != null) {
       outcomes.push(refusal);
-      if (refusal === 'crush-reversed') {
-        door.state = 'opening';
-        continue;
-      }
-      // Any other close-phase refusal holds the leaf where it is for this step.
-      remaining = 0;
+      if (refusal === 'crush-reversed') door.state = 'opening';
+      else remaining = 0;
       continue;
     }
 
-    const needed = door.progress * DOOR_TRAVEL_MS;
-    if (remaining < needed) {
-      door.progress -= remaining / DOOR_TRAVEL_MS;
-      remaining = 0;
-    } else {
-      door.progress = 0;
-      door.state = 'closed';
-      door.dwellMs = 0;
-      remaining -= needed;
-    }
+    remaining = travel(door, remaining, 0);
   }
 
   return { outcomes };
 }
 
 /** Resolves one interact command against one door (FR-003, FR-004, FR-006): every
- * path returns a declared outcome. The neighbour rule (FR-016) is a fact about
- * two doors, so `door-field.ts` applies it first. */
+ * path returns a declared outcome, and each moving state names its own refusal
+ * (US1-S5). The neighbour rule (FR-016) is a fact about two doors, so it lives in
+ * `door-field.ts` and is applied before this. */
 export function interactDoor(door: Door): InteractOutcome {
   switch (door.state) {
     case 'opening':
-      // A moving door does not reverse and does not re-trigger (US1-S5).
+      // Moving: does not reverse, does not re-trigger (US1-S5).
       return 'blocked-moving';
     case 'closing':
-      // It cannot be re-opened until it reports `closed` (US1-S6).
+      // Moving, and cannot be re-opened until it reports `closed` (US1-S6).
       return 'refusing-closing';
-    case 'open': {
+    case 'open':
       // A player lingering in the doorway pushes the auto-close back (US1-S7).
       door.dwellMs = 0;
       return 'opened-now';
-    }
     case 'closed': {
       const refusal = firstRefusal(door, 'interact');
       if (refusal != null) return refusal;

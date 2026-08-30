@@ -3,39 +3,25 @@
 // an empty or silent result. Pure data: no DOM, no three.js.
 
 export const INTERACT_OUTCOMES = [
-  /** A closed door accepted the command and began opening. */
-  'opened',
-  /** An already-open door accepted the command; its dwell timer was reset. */
-  'opened-now',
-  /** The door is mid-travel (opening); it neither reverses nor re-triggers. */
-  'blocked-moving',
-  /** The door is closing and will finish closing before it can be re-opened. */
-  'refusing-closing',
-  /** Opening would drive this door's leaf into a neighbouring door's tile. */
-  'blocked-neighbour',
-  /** The door is locked and the inventory lacks the named key kind. */
-  'locked-missing-key',
-  /** A closing door aborted and reversed rather than closing on the player. */
-  'crush-reversed',
-  /** A secret that has already been pushed; secrets do not close. */
-  'already-open',
-  /** A secret whose travel path is obstructed by level geometry. */
-  'blocked-geometry',
-  /** Nothing interactable was in range of the player. */
-  'no-target',
+  'opened', // a closed door accepted the command and began opening
+  'opened-now', // an open door accepted it; its dwell timer was reset
+  'blocked-moving', // the door is opening: it neither reverses nor re-triggers
+  'refusing-closing', // the door is closing and will finish before it re-opens
+  'blocked-neighbour', // opening would drive the leaf into another door's tile
+  'locked-missing-key', // locked, and the inventory lacks the named key kind
+  'crush-reversed', // a closing door reversed rather than close on the player
+  'already-open', // a secret already pushed; secrets do not close
+  'blocked-geometry', // a secret whose travel path is obstructed
+  'no-target', // nothing interactable was in range
 ] as const;
 
 export type InteractOutcome = (typeof INTERACT_OUTCOMES)[number];
 
-// US1-S5 and US1-S6 read together: a door in `opening` *or* `closing` refuses with
-// state and progress unchanged (S5), and the closing case names `refusing-closing`
-// rather than re-opening (S6, FR-003). Both hold at once because `refusing-closing`
-// is the closing-specific member of the moving-door refusal class below, not a
-// different answer to it — one union, two names, one behaviour: refuse, do not
-// reverse, do not re-trigger.
+// The refusal a moving door answers with, named per state (US1-S5): a door in
+// `opening` says `blocked-moving`, one in `closing` says `refusing-closing`
+// (US1-S6). Both refuse identically — no reverse, no re-trigger (FR-003).
 export const MOVING_REFUSALS = ['blocked-moving', 'refusing-closing'] as const;
 
-/** A refusal issued because the door is mid-travel (US1-S5, US1-S6, FR-003). */
 export type MovingRefusal = (typeof MOVING_REFUSALS)[number];
 
 /** True when `outcome` refuses the command because the door is moving. */
