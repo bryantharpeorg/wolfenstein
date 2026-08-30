@@ -36,7 +36,11 @@ function attachErrorHandlers(): void {
   };
 }
 
-function makeRenderer(): Renderer {
+async function makeRenderer(): Promise<{
+  renderer: Renderer;
+  usedBackend: 'webgpu' | 'webgl';
+  fallbackReason: string | null;
+}> {
   const backend = selectBackend(navigator);
 
   const container = document.getElementById('canvas-container');
@@ -54,16 +58,21 @@ function makeRenderer(): Renderer {
 async function run() {
   attachErrorHandlers();
 
-  const backend = selectBackend(navigator);
-  const diag = createDiagnostics(backend);
+  const selected = selectBackend(navigator);
+  const diag = createDiagnostics(selected);
   window.__diag = diag;
 
   const overlay = createPerfOverlay();
   installToggle(overlay);
 
   let renderer: Renderer;
+  let usedBackend = selected;
   try {
-    renderer = makeRenderer();
+    const result = await makeRenderer();
+    renderer = result.renderer;
+    usedBackend = result.usedBackend;
+    diag.renderer = usedBackend;
+    diag.fallbackReason = result.fallbackReason;
   } catch (error) {
     if (isRendererFailure(error)) {
       showFatalMessage(`Renderer initialization failed for ${error.backend}: ${error.reason}`);

@@ -23,21 +23,55 @@ export interface CreateRendererOptions {
   backend: RendererBackend;
 }
 
+export interface CreateRendererResult {
+  renderer: WebGLRenderer | WebGPURenderer;
+  usedBackend: RendererBackend;
+  fallbackReason: string | null;
+}
+
 function makeParams(canvas: HTMLCanvasElement) {
   return { canvas, antialias: true, alpha: false };
 }
 
-export function createRenderer(options: CreateRendererOptions) {
+function makeFailure(backend: RendererBackend, error: unknown): never {
+  const reason = error instanceof Error ? error.message : String(error);
+  const failure: RendererFailure = { backend, reason };
+  throw failure;
+}
+
+export async function createRenderer(
+  options: CreateRendererOptions,
+): Promise<CreateRendererResult> {
   const canvas = options.canvas;
+  const requested = options.backend;
+
+  if (requested === 'webgpu') {
+    try {
+      const renderer = new WebGPURenderer(makeParams(canvas));
+      const usedBackend: RendererBackend = 'webgpu';
+      return { renderer, usedBackend, fallbackReason: null };
+    } catch (error) {
+      try {
+        const fallback = new WebGLRenderer(makeParams(canvas));
+        return {
+          renderer: fallback,
+          usedBackend: 'webgl',
+          fallbackReason:
+            error instanceof Error ? error.message : String(error),
+        };
+      } catch (fallbackError) {
+        makeFailure(
+          'webgl',
+          `WebGPU failed (${String(error)}); WebGL fallback also failed (${String(fallbackError)})`,
+        );
+      }
+    }
+  }
 
   try {
-    if (options.backend === 'webgpu') {
-      return new WebGPURenderer(makeParams(canvas));
-    }
-    return new WebGLRenderer(makeParams(canvas));
+    const renderer = new WebGLRenderer(makeParams(canvas));
+    return { renderer, usedBackend: 'webgl', fallbackReason: null };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    const failure: RendererFailure = { backend: options.backend, reason };
-    throw failure;
+    makeFailure('webgl', error);
   }
 }
