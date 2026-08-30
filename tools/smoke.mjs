@@ -500,6 +500,142 @@ async function runPlayerWalkPass(browser, url, grid) {
   return errors;
 }
 
+// Walks the shipped level to a locked door and presses interact, so US2's refusal
+// is observed on the running page rather than only in vitest: the reason and the
+// *named* key reach `__diag.interaction`, the key is then collected on its own
+// tile, the same door opens, and the key is still in the inventory (US2-S8).
+async function runLockedDoorPass(browser, url) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
+  const finish = async () => {
+    await context.close();
+    return errors;
+  };
+
+  await page.goto(url, { waitUntil: 'load' });
+  try {
+    await page.waitForFunction(
+      () =>
+        window.__diag != null &&
+        window.__diag.ready === true &&
+        window.__diag.player != null &&
+        window.__diag.interaction != null &&
+        typeof window.__playerDrive === 'function',
+      { timeout: 15000 },
+    );
+  } catch (error) {
+    errors.push(`__diag.interaction / __playerDrive did not appear within 15 seconds (${error})`);
+    return finish();
+  }
+
+  // The scripted drive, installed in the page because it is run there, not here.
+  await page.evaluate(() => {
+    window.__smokeWalkTo = (targetX, targetZ) => {
+      for (let step = 0; step < 400; step += 1) {
+        // `__diag.player` is a live object, so the previous position has to be read
+        // out as numbers or the no-progress check compares a value to itself.
+        const fromX = window.__diag.player.x;
+        const fromZ = window.__diag.player.z;
+        const distance = Math.hypot(targetX - fromX, targetZ - fromZ);
+        if (distance < 0.05) break;
+        window.__playerDrive((4 * (targetX - fromX)) / distance, (4 * (targetZ - fromZ)) / distance, 50);
+        const moved = Math.hypot(window.__diag.player.x - fromX, window.__diag.player.z - fromZ);
+        if (moved < 1e-4) break;
+      }
+      return { x: window.__diag.player.x, z: window.__diag.player.z };
+    };
+    window.__smokeInteract = () =>
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+  });
+
+  // Waits for the expected reading, but never fails on the wait: the assertions
+  // below report what was actually read, which is the more useful message.
+  const settle = async (predicate) => {
+    try {
+      await page.waitForFunction(predicate, { timeout: 8000 });
+    } catch {
+      /* reported by the assertion that follows */
+    }
+  };
+  const interaction = () => page.evaluate(() => ({ ...window.__diag.interaction }));
+
+  // Leg 1: south to the unlocked door at (10,21), open it, walk through.
+  await page.evaluate(() => {
+    window.__smokeWalkTo(10.5, 20.5);
+    window.__smokeInteract();
+  });
+  await settle(() => window.__diag.interaction.doorsOpen >= 1);
+  const opening = await interaction();
+  if (!(opening.doorsOpen >= 1)) {
+    errors.push(`no door opened after the interact command (lastReason=${opening.lastReason})`);
+    return finish();
+  }
+
+  // Leg 2: through the doorway, east along row 31, up to the silver-locked door.
+  const atDoor = await page.evaluate(() => {
+    window.__smokeWalkTo(10.5, 31.5);
+    return window.__smokeWalkTo(41.5, 31.5);
+  });
+  if (Math.abs(atDoor.x - 41.5) > 0.75 || Math.abs(atDoor.z - 31.5) > 0.75) {
+    errors.push(
+      `walk to the locked door ended at (${atDoor.x.toFixed(2)}, ${atDoor.z.toFixed(2)}), not beside it`,
+    );
+    return finish();
+  }
+
+  // The refusal: named reason, named key, and no key spent to learn it.
+  await page.evaluate(() => window.__smokeInteract());
+  await settle(() => window.__diag.interaction.lastRefusalKeyKind != null);
+  const refused = await interaction();
+  if (refused.lastReason !== 'locked-missing-key') {
+    errors.push(`__diag.interaction.lastReason is ${refused.lastReason}, not locked-missing-key`);
+  }
+  if (refused.lastRefusalKeyKind !== 'silver') {
+    errors.push(`__diag.interaction.lastRefusalKeyKind is ${refused.lastRefusalKeyKind}, not silver`);
+  }
+  if (refused.keys?.silver !== 0) {
+    errors.push(`__diag.interaction.keys.silver is ${refused.keys?.silver}, not 0 before pickup`);
+  }
+
+  // The silver key lies one room west, on the spawn side of its own door.
+  await page.evaluate(() => {
+    window.__smokeWalkTo(30.5, 31.5);
+    window.__smokeWalkTo(30.5, 30.5);
+  });
+  await settle(() => window.__diag.interaction.keys.silver === 1);
+  if ((await interaction()).keys?.silver !== 1) {
+    errors.push('the silver key was not collected on its tile');
+    return finish();
+  }
+
+  // The same door, the same press, the other outcome - and the key stays.
+  await page.evaluate(() => {
+    window.__smokeWalkTo(30.5, 31.5);
+    window.__smokeWalkTo(41.5, 31.5);
+    window.__smokeInteract();
+  });
+  await settle(() => window.__diag.interaction.lastReason === 'opened');
+  const opened = await interaction();
+  if (opened.lastReason !== 'opened') {
+    errors.push(`the locked door did not open with its key: lastReason=${opened.lastReason}`);
+  }
+  if (opened.keys?.silver !== 1) {
+    errors.push(`the silver key did not survive the unlock: keys.silver=${opened.keys?.silver}`);
+  }
+  if (opened.keyConsumed !== false) {
+    errors.push(`__diag.interaction.keyConsumed is ${opened.keyConsumed}, not false`);
+  }
+  if (opened.lastRefusalKeyKind !== null) {
+    errors.push(
+      `__diag.interaction.lastRefusalKeyKind is ${opened.lastRefusalKeyKind} after a success, not null`,
+    );
+  }
+
+  return finish();
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const injectError = args.includes('--inject-error');
@@ -580,6 +716,15 @@ async function main() {
       fail('Player walk smoke pass failed');
     }
     console.log('Player walk smoke pass: 200 tiles walked, all positions walkable, not stuck');
+
+    const lockedDoor = await runLockedDoorPass(browser, url);
+    if (lockedDoor.length > 0) {
+      for (const error of lockedDoor) {
+        console.error(error);
+      }
+      fail('Locked door smoke pass failed');
+    }
+    console.log('Locked door smoke pass: refused by name, then opened with the key it named');
 
     const noGpu = await runSmokePass(
       browser,

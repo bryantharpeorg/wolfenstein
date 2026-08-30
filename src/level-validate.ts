@@ -16,7 +16,11 @@ import {
   type LockKind,
   type WallMaterial,
 } from './level';
+import { extraLevelErrors, type ExtraErrorCategory } from './interaction/level-rules';
 
+// The categories this file declares, plus whatever the discovered rules declare
+// for themselves (`src/interaction/level-rules.ts`). A later story adds a rule
+// as a new file rather than by widening this union.
 export type ErrorCategory =
   | 'dimensions'
   | 'exit'
@@ -24,7 +28,8 @@ export type ErrorCategory =
   | 'lock'
   | 'material'
   | 'reachability'
-  | 'door-placement';
+  | 'door-placement'
+  | ExtraErrorCategory;
 
 export interface LevelError {
   category: ErrorCategory;
@@ -303,6 +308,10 @@ export function validateLevel(
       });
     }
   }
+
+  // 8. every rule discovered under `src/interaction/rules/` — FR-011's key
+  // placement and, later, FR-014's secret placement. One call, no index.
+  errors.push(...extraLevelErrors({ grid, playerSpawn, itemSpawns, doorLocks }));
 
   return { valid: errors.length === 0, errors, counts };
 }
