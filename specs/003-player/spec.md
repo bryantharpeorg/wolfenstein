@@ -1,5 +1,5 @@
 ---
-state: ready
+state: landed
 depends_on_landed: ["002-map-geometry"]
 ---
 
