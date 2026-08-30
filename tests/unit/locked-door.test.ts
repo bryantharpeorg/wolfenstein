@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { createInventory, addKey, keyCounts } from '../../src/interaction/keys';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createInventory, addKey, keyCounts, type KeyInventory } from '../../src/interaction/keys';
 import { lockDecision, lockGate, requiredKeyFor } from '../../src/interaction/locks';
+import { createDoor, interactDoor } from '../../src/interaction/door';
+import { registerDoorGate, resetDoorGatesForTest } from '../../src/interaction/gate-registry';
+import { DOOR_TRAVEL_MS, DOOR_DWELL_MS } from '../../src/interaction/params';
+import { advance } from './door-advance';
 
 const GOLD_DOOR = { x: 31, z: 42, lock: 'gold' } as const;
 const SILVER_DOOR = { x: 42, z: 31, lock: 'silver' } as const;
@@ -96,5 +100,109 @@ describe('lock gate (FR-009, FR-010)', () => {
     const gate = lockGate(LOCKS, createInventory());
 
     expect(gate({ door: { x: 21, z: 10, lock: 'none' }, phase: 'interact' })).toBeNull();
+  });
+});
+
+// The gate registered on US1's door machine: the same decision, now answered by
+// a real door, so the state and progress US2-S3 and US2-S4 name are observed
+// rather than assumed.
+describe('a locked door on the door machine (FR-009, FR-010, US2-S3, US2-S4, US2-S5)', () => {
+  beforeEach(() => resetDoorGatesForTest());
+  afterEach(() => resetDoorGatesForTest());
+
+  function armed(inventory: KeyInventory): void {
+    registerDoorGate(lockGate(LOCKS, inventory));
+  }
+
+  it('refuses a gold door with locked-missing-key, closed and at progress 0', () => {
+    const inventory = createInventory();
+    armed(inventory);
+    const door = createDoor({ x: 31, z: 42, axis: 'z', lock: 'gold' });
+
+    const outcome = interactDoor(door);
+
+    expect(outcome).toBe('locked-missing-key');
+    expect(door.state).toBe('closed');
+    expect(door.progress).toBe(0);
+  });
+
+  it('stays shut under a hundred refused presses', () => {
+    const inventory = createInventory();
+    armed(inventory);
+    const door = createDoor({ x: 31, z: 42, axis: 'z', lock: 'gold' });
+
+    for (let i = 0; i < 100; i += 1) expect(interactDoor(door)).toBe('locked-missing-key');
+    advance(door, DOOR_TRAVEL_MS * 2);
+
+    expect(door.state).toBe('closed');
+    expect(door.progress).toBe(0);
+  });
+
+  it('opens for the matching key and leaves the key in the inventory', () => {
+    const inventory = createInventory();
+    addKey(inventory, 'gold');
+    armed(inventory);
+    const door = createDoor({ x: 31, z: 42, axis: 'z', lock: 'gold' });
+
+    const outcome = interactDoor(door);
+
+    expect(outcome).toBe('opened');
+    expect(door.state).toBe('opening');
+    expect(keyCounts(inventory)).toEqual({ silver: 0, gold: 1 });
+    // And it goes on opening: the unlock is not a one-frame flicker.
+    advance(door, DOOR_TRAVEL_MS);
+    expect(door.state).toBe('open');
+    expect(keyCounts(inventory)).toEqual({ silver: 0, gold: 1 });
+  });
+
+  it('opens the same door again later - the key was never spent', () => {
+    const inventory = createInventory();
+    addKey(inventory, 'gold');
+    armed(inventory);
+    const door = createDoor({ x: 31, z: 42, axis: 'z', lock: 'gold' });
+
+    interactDoor(door);
+    advance(door, DOOR_TRAVEL_MS + DOOR_DWELL_MS + DOOR_TRAVEL_MS);
+    expect(door.state).toBe('closed');
+
+    expect(interactDoor(door)).toBe('opened');
+    expect(keyCounts(inventory)).toEqual({ silver: 0, gold: 1 });
+  });
+
+  it('refuses a silver door held against a gold key, naming silver', () => {
+    const inventory = createInventory();
+    addKey(inventory, 'gold');
+    const named: string[] = [];
+    registerDoorGate(lockGate(LOCKS, inventory, (kind) => named.push(kind)));
+    const door = createDoor({ x: 42, z: 31, axis: 'x', lock: 'silver' });
+
+    const outcome = interactDoor(door);
+
+    expect(outcome).toBe('locked-missing-key');
+    expect(named).toEqual(['silver']);
+    expect(door.state).toBe('closed');
+    expect(door.progress).toBe(0);
+  });
+
+  it('lets an unlocked door open with an empty inventory', () => {
+    armed(createInventory());
+    const door = createDoor({ x: 21, z: 10, axis: 'x', lock: 'none' });
+
+    expect(interactDoor(door)).toBe('opened');
+    expect(door.state).toBe('opening');
+  });
+
+  it('does not hold an unlocked-by-key door shut once it is time to close', () => {
+    const inventory = createInventory();
+    addKey(inventory, 'gold');
+    armed(inventory);
+    const door = createDoor({ x: 31, z: 42, axis: 'z', lock: 'gold' });
+
+    interactDoor(door);
+    advance(door, DOOR_TRAVEL_MS);
+    advance(door, DOOR_DWELL_MS);
+    advance(door, DOOR_TRAVEL_MS);
+
+    expect(door.state).toBe('closed');
   });
 });
