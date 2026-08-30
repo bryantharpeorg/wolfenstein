@@ -1,3 +1,8 @@
+---
+state: ready
+depends_on_landed: ["004-interaction"]
+---
+
 # Feature Specification: Procedural Materials and Lighting
 
 **Feature Branch**: `005-materials`

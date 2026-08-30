@@ -1,3 +1,8 @@
+---
+state: ready
+depends_on_landed: ["002-map-geometry"]
+---
+
 # Feature Specification: Player Movement and Camera
 
 **Feature Branch**: `003-player`

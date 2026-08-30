@@ -35,3 +35,8 @@ playwright-report/
 
 # Ergane runtime root: worktrees, session transcripts, verification evidence.
 .ergane/
+
+# Ergane's worktree-boundary detector writes its findings here, inside the repo it
+# audits. Untracked and unignored, it appears as `git status` noise and is one
+# `git add -A` from being committed. See feedback #48.
+.ergane-detector/

@@ -1,3 +1,8 @@
+---
+state: ready
+depends_on_landed: ["004-interaction"]
+---
+
 # Feature Specification: Enemy Guards and Pathing
 
 **Feature Branch**: `006-enemies`
