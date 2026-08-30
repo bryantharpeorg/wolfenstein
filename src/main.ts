@@ -44,6 +44,10 @@ async function run() {
   window.__diag = diag;
   installErrorHandlers(() => window.__diag);
 
+  if ((window as any).__smokeInjectStartupError === true) {
+    throw new Error('Injected smoke self-test error');
+  }
+
   const overlay = createPerfOverlay();
   installToggle(overlay);
 

@@ -20,6 +20,6 @@
     "outDir": "./dist",
     "rootDir": "."
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "tools/**/*.mjs", "tools/**/*.ts", "tools/**/*.d.ts", "vite.config.ts"],
+  "include": ["src/**/*.ts", "tests/**/*.ts", "tools/**/*.ts", "tools/**/*.d.ts", "vite.config.ts"],
   "exclude": ["node_modules", "dist", "coverage"]
 }
