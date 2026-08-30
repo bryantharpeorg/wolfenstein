@@ -6,6 +6,13 @@ ask a question you can answer with a defensible default.
 
 This file exists so the first node to hit a fork does not have to invent a format.
 
+**Precedence.** The `domain-modeling` skill in `.claude/skills/` ships an `ADR-FORMAT.md`
+describing numbered ADR files under `docs/adr/`. **That convention is not used in this
+repository.** Article VIII of the constitution is the standard, this file is its target,
+and the constitution outranks a skill — ergane injects the standards path as binding and
+marks its own outer loop authoritative, while skills are advisory. Do not create
+`docs/adr/`. If a decision genuinely needs more than one line, raise an escalation.
+
 ## Format
 
 One decision per line. Append to the end. Never edit or delete an existing line —
@@ -34,3 +41,4 @@ let the operator answer.
 - 2026-08-29 | operator | Agent skills are vendored into `.claude/skills/` as real files, copied from mattpocock/skills@6654f6b — a node's sandbox gets a factory-owned HOME, so `~/.claude` skills are invisible and the symlinked local copies would dangle.
 - 2026-08-29 | operator | `design-an-interface` dropped from the architect persona rather than sourced — it was retired upstream and absorbed into `codebase-design`, which the architect already loads.
 - 2026-08-29 | operator | `docs/agents/issue-tracker.md` points findings at the node verdict instead of a tracker — the `code-review` skill requires that file and otherwise instructs the node to run a slash command it has no way to run.
+- 2026-08-29 | operator | DECISIONS.md outranks the `domain-modeling` skill's ADR-FORMAT.md, and `docs/adr/` is not used — the constitution is binding on nodes and a vendored skill is advisory, so the contradiction is settled here rather than per-node.
