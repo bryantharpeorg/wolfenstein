@@ -1,6 +1,8 @@
+export type RendererBackend = 'webgpu' | 'webgl';
+
 export interface Diagnostics {
   ready: boolean;
-  renderer: 'webgpu' | 'webgl' | null;
+  renderer: RendererBackend | null;
   fps: number;
   frameTimeMs: number;
   drawCalls: number;
@@ -8,7 +10,7 @@ export interface Diagnostics {
   fallbackReason: string | null;
 }
 
-export function createDiagnostics(renderer: 'webgpu' | 'webgl' | null = null): Diagnostics {
+export function createDiagnostics(renderer: RendererBackend | null = null): Diagnostics {
   return {
     ready: false,
     renderer,
@@ -23,10 +25,33 @@ export function createDiagnostics(renderer: 'webgpu' | 'webgl' | null = null): D
 const FPS_WINDOW_FRAMES = 60;
 
 export function updateFps(diag: Diagnostics, deltaMs: number): void {
-  if (deltaMs > 0) {
-    const instant = 1000 / deltaMs;
-    const weight = 1 / FPS_WINDOW_FRAMES;
-    diag.fps = diag.fps * (1 - weight) + instant * weight;
-    diag.frameTimeMs = deltaMs;
+  if (deltaMs <= 0) {
+    diag.frameTimeMs = 0;
+    return;
+  }
+
+  diag.frameTimeMs = deltaMs;
+
+  if (diag.frameTimeSamples == null) {
+    diag.frameTimeSamples = [];
+  }
+
+  const samples = diag.frameTimeSamples;
+  samples.push(deltaMs);
+  if (samples.length > FPS_WINDOW_FRAMES) {
+    samples.shift();
+  }
+
+  const average = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+  diag.fps = 1000 / average;
+}
+
+/**
+ * Internal mutable state used only by {@link updateFps}. It is attached to the
+ * diagnostics object so the rest of the application does not need to manage it.
+ */
+declare module './diag' {
+  interface Diagnostics {
+    frameTimeSamples?: number[];
   }
 }

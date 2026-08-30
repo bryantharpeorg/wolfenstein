@@ -2,11 +2,17 @@ import { selectBackend } from './renderer/select';
 import { createRenderer, isRendererFailure } from './renderer/create';
 import { buildEmptyScene, resizeCamera } from './scene/empty';
 import { createDiagnostics, updateFps } from './diag/diag';
+import { installErrorHandlers } from './diag/handlers';
 import { createPerfOverlay, installToggle } from './overlay/perf';
 import type { WebGLRenderer } from 'three/src/renderers/WebGLRenderer.js';
 import type WebGPURenderer from 'three/src/renderers/webgpu/WebGPURenderer.js';
 
 type Renderer = WebGLRenderer | WebGPURenderer;
+
+function getDrawCalls(renderer: Renderer): number {
+  const info = renderer.info.render;
+  return 'drawCalls' in info ? (info as { drawCalls: number }).drawCalls : info.calls;
+}
 
 function showFatalMessage(message: string): void {
   document.body.innerHTML = '';
@@ -16,24 +22,6 @@ function showFatalMessage(message: string): void {
   paragraph.style.color = '#fff';
   paragraph.style.fontFamily = 'sans-serif';
   document.body.appendChild(paragraph);
-}
-
-function attachErrorHandlers(): void {
-  window.onerror = (_event, _source, _lineno, _colno, error) => {
-    const message = error?.message ?? String(error ?? 'unknown error');
-    if (window.__diag != null) {
-      window.__diag.errors.push(message);
-    }
-    return false;
-  };
-
-  const originalConsoleError = console.error;
-  console.error = (...args: unknown[]) => {
-    originalConsoleError.apply(console, args);
-    if (window.__diag != null) {
-      window.__diag.errors.push(args.map(String).join(' '));
-    }
-  };
 }
 
 async function makeRenderer(): Promise<{
@@ -56,11 +44,14 @@ async function makeRenderer(): Promise<{
 }
 
 async function run() {
-  attachErrorHandlers();
-
   const selected = selectBackend(navigator);
   const diag = createDiagnostics(selected);
   window.__diag = diag;
+  installErrorHandlers(() => window.__diag);
+
+  if (new URLSearchParams(window.location.search).has('smoke-inject-error')) {
+    window.onerror?.call(window, 'deliberate smoke error in startup', location.href, 0, 0, new Error('deliberate smoke error'));
+  }
 
   const overlay = createPerfOverlay();
   installToggle(overlay);
@@ -92,6 +83,7 @@ async function run() {
   function resize() {
     const width = window.innerWidth;
     const height = window.innerHeight;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height, false);
     resizeCamera(empty.camera);
   }
@@ -111,10 +103,7 @@ async function run() {
 
     renderer.render(empty.scene, empty.camera);
 
-    diag.drawCalls =
-      'drawCalls' in renderer.info.render
-        ? (renderer.info.render as { drawCalls: number }).drawCalls
-        : renderer.info.render.calls;
+    diag.drawCalls = getDrawCalls(renderer);
     updateFps(diag, delta);
     overlay.update(diag);
     diag.ready = true;

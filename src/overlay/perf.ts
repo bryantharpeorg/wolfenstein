@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import type { Diagnostics } from '../diag/diag';
 
 export const OVERLAY_TOGGLE_KEY = 'F1';
@@ -24,9 +26,13 @@ export function createPerfOverlay(): PerfOverlay {
   element.style.zIndex = '1000';
   element.style.whiteSpace = 'pre';
 
+  const isDev = import.meta.env.DEV === true;
+  const visible = isDev;
+  element.style.display = visible ? 'block' : 'none';
+
   const overlay: PerfOverlay = {
     element,
-    visible: true,
+    visible,
     toggle() {
       overlay.visible = !overlay.visible;
       element.style.display = overlay.visible ? 'block' : 'none';
