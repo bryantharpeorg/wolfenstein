@@ -1,14 +1,8 @@
 /**
- * The doors system: the render and DOM edge of US1's door state machine.
- *
- * Everything that decides anything lives in `src/interaction/` and is tested
- * without a page. This file does only what a page is needed for: it builds a
- * mesh per door, installs the one keydown listener the interact binding
- * resolves through, steps every door from `update()`, drives each mesh offset
- * from `progress`, and publishes the counts and the last reason to
- * `window.__diag.interaction`.
- *
- * `src/main.ts` is not edited: 001's glob discovery finds this file.
+ * The doors system: the render and DOM edge of US1's machine. Every decision
+ * lives in `src/interaction/` and is tested without a page; this file builds a
+ * mesh per door, installs the one keydown listener, steps the doors each frame
+ * and publishes the counts (FR-005, FR-015). `src/main.ts` is not edited.
  */
 import { BackSide, BoxGeometry, Mesh, MeshStandardMaterial, type Object3D } from 'three';
 import { defineSystem, type GameContext } from '../../boot/registry';
@@ -39,9 +33,8 @@ import {
 import { buildDoorwayShell } from './doorway-mesh';
 import { isDoorTileGeometry } from './static-faces';
 
-// Flat colours, per Constitution II: the door leaf and the recess it slides
-// into are geometry and colour, never an imported texture. M4 re-skins these
-// same meshes without touching the state machine.
+// Flat colours, per Constitution II: leaf and recess are geometry and colour,
+// never an imported texture.
 const LEAF_COLOR = 0xb07a2c;
 const SHELL_COLOR = 0x6f6f6f;
 
@@ -51,7 +44,6 @@ let field: DoorField | null = null;
 let interaction: InteractionDiagnostics | null = null;
 const leaves = new Map<Door, Mesh>();
 
-/** The player capsule, read through the `__diag.player` contract 003 declares. */
 function readPlayer(ctx: GameContext): PlayerCapsule | null {
   const player = ctx.diag.player;
   if (player == null) return null;
@@ -67,15 +59,9 @@ function leafPosition(door: Door): { x: number; z: number } {
     : { x: centreX, z: centreZ + offset };
 }
 
-/**
- * Hides the static faces 002 emitted for the `D` tiles, which are the closed
- * door drawn as wall. The moving leaf replaces them, and leaving both in place
- * would show a door that opens behind a wall that never does.
- *
- * The group is identified by its own vertices — every one of them lies on a door
- * tile, which is true of no other merged wall group — rather than by an index
- * into 002's build order, which is not this story's to depend on.
- */
+/** Hides the faces 002 emitted for the `D` tiles — the closed door drawn as wall,
+ * which the moving leaf replaces — recognising the group by its own vertices
+ * rather than by an index into 002's build order. */
 function hideStaticDoorFaces(scene: Object3D, doors: readonly Door[]): void {
   for (const child of scene.children) {
     if (!(child instanceof Mesh)) continue;
@@ -88,8 +74,8 @@ function hideStaticDoorFaces(scene: Object3D, doors: readonly Door[]): void {
 function buildMeshes(ctx: GameContext, doors: readonly Door[]): void {
   const shell = buildDoorwayShell(doors);
   if (shell != null) {
-    // BackSide: the shell is seen from inside the doorway, so its inward faces
-    // are the ones that must draw. One mesh for every doorway, one draw call.
+    // BackSide: the shell is seen from inside, so its inward faces are the ones
+    // that draw. One mesh for every doorway in the level, one draw call.
     ctx.scene.add(new Mesh(shell, new MeshStandardMaterial({ color: SHELL_COLOR, side: BackSide })));
   }
 
@@ -113,19 +99,18 @@ defineSystem({
     interaction = ensureInteractionDiag(ctx.diag);
     setDoorCounts(interaction, built.doors.length, 0);
 
-    // A closing leaf asks this before it travels; the player's position lives on
-    // this side of the DOM line, so it crosses as a closure (FR-015).
+    // The player lives on this side of the DOM line, so it crosses as a closure
+    // (FR-015). An open door stops blocking 003's collider (FR-016).
     registerDoorGate(createCrushGate(() => readPlayer(ctx)));
-    // A fully open door stops blocking 003's collider (FR-016, US1-S2).
     registerOpenTileProvider(() => openDoorTiles(built));
 
-    // Before buildMeshes, not after: the doorway shell's own vertices all lie on
-    // door tiles, so it would match the same predicate.
+    // Before buildMeshes, not after: the shell's own vertices lie on door tiles,
+    // so it would match the same predicate.
     hideStaticDoorFaces(ctx.scene, built.doors);
     buildMeshes(ctx, built.doors);
 
-    // The single interact handler (FR-005). Both bound codes resolve through
-    // `bindings.ts`; nothing here knows which key was pressed.
+    // The single interact handler (FR-005): both bound codes resolve through
+    // `bindings.ts`, and nothing here knows which key was pressed.
     window.addEventListener('keydown', (event: KeyboardEvent) => {
       if (commandForEvent(event) == null) return;
       event.preventDefault();

@@ -4,14 +4,12 @@ import {
   doorAt,
   findTargetDoor,
   interactWithDoors,
-  destinationConflicts,
 } from '../../src/interaction/door-field';
 import { doorDestinationTile } from '../../src/interaction/door';
 import { LEVEL_GRID, DOOR_LOCKS } from '../../src/level';
 
-// Two `D` tiles side by side in one wall. Door A at (1,2) can retract west into
-// the solid border; door B at (2,2) has no wall of its own to retract into, so
-// its only travel destination is A's tile — the corner pair of the Edge Cases.
+// Two `D` tiles side by side. Door A at (1,2) retracts west into the border;
+// door B at (2,2) has no wall of its own, so its only destination is A's tile.
 const ADJACENT_DOORS = ['111111', '100001', '1DD001', '100001', '111111'];
 
 describe('door field construction (FR-016, US1-S9)', () => {
@@ -40,8 +38,6 @@ describe('door field construction (FR-016, US1-S9)', () => {
 
   it('gives no two doors the same destination tile', () => {
     const field = buildDoorField(LEVEL_GRID, DOOR_LOCKS);
-    expect(destinationConflicts(field)).toEqual([]);
-
     const destinations = field.doors.map((door) => {
       const tile = doorDestinationTile(door);
       return `${tile.x},${tile.z}`;

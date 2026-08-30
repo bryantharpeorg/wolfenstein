@@ -9,10 +9,8 @@ import {
 } from '../../src/interaction/door';
 import { DOOR_TRAVEL_MS, DOOR_DWELL_MS, MAX_STEP_MS } from '../../src/interaction/params';
 
-// US1-S1: the door module must be importable from a test file that defines no
-// `window` and pulls in no three.js. The imports above succeeding is half the
-// proof; the source-text assertions below catch a DOM or three reference that
-// happens to sit behind a lazy branch.
+// US1-S1: the imports above succeeding is half the proof; the source-text
+// assertions below catch a DOM or three reference behind a lazy branch.
 
 const THREE_IMPORT = /(from\s+['"]three['"]|import\s+['"]three['"]|require\(\s*['"]three['"]\s*\))/;
 const DOM_GLOBAL =

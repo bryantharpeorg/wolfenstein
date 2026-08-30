@@ -1,12 +1,6 @@
-// The complete set of interact outcomes, declared once (FR-006).
-//
-// Every interact command resolved against a door, a lock or a secret returns one
-// of these — never an empty or silent result. The union is written out in full
-// here, in the story that creates the file, so US2 and US3 import it rather than
-// widening it: a union that grows story by story is a shared file every node
-// edits, which is the contention this layout exists to avoid.
-//
-// Pure data. No DOM, no three.js.
+// The complete set of interact outcomes, declared once and in full (FR-006), so
+// US2 and US3 import the union rather than widening it. No command resolves to
+// an empty or silent result. Pure data: no DOM, no three.js.
 
 export const INTERACT_OUTCOMES = [
   /** A closed door accepted the command and began opening. */
@@ -32,10 +26,3 @@ export const INTERACT_OUTCOMES = [
 ] as const;
 
 export type InteractOutcome = (typeof INTERACT_OUTCOMES)[number];
-
-const OUTCOME_SET: ReadonlySet<string> = new Set<string>(INTERACT_OUTCOMES);
-
-/** Whether an arbitrary value is one of the declared outcomes (FR-006). */
-export function isInteractOutcome(value: unknown): value is InteractOutcome {
-  return typeof value === 'string' && OUTCOME_SET.has(value);
-}

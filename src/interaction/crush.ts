@@ -1,7 +1,5 @@
-// The crush test: does a door's travel volume intersect the player's capsule?
-// (FR-015). Pure arithmetic — an axis-aligned box against a circle — with the
-// position handed in as arguments, never read from a global, so the test needs
-// no page and no render loop.
+// The crush test (FR-015): an axis-aligned box against a circle, with the player
+// position handed in as arguments rather than read from a global.
 
 import type { Door, PlayerCapsule } from './door';
 import { DOOR_TRAVEL_TILES } from './params';
@@ -14,14 +12,10 @@ export interface Aabb {
   maxZ: number;
 }
 
-/** A boundary contact is contact, not penetration, at this tolerance. */
 const CRUSH_EPSILON = 1e-9;
 
-/**
- * The volume the leaf sweeps as it closes from its current progress: its own
- * tile, plus whatever part of the recess the leaf still fills. A player anywhere
- * inside this box is in the leaf's way.
- */
+/** The volume the leaf sweeps as it closes: its tile, plus the part of the recess
+ * it still fills. A player anywhere inside is in the leaf's way. */
 export function doorTravelVolume(door: Door): Aabb {
   const retracted = door.progress * DOOR_TRAVEL_TILES * door.direction;
   if (door.axis === 'x') {
@@ -44,17 +38,9 @@ function clamp(value: number, low: number, high: number): number {
   return value < low ? low : value > high ? high : value;
 }
 
-/**
- * Whether a capsule of `radius` centred at (playerX, playerZ) overlaps the
- * door's travel volume. A centre inside the box always counts, whatever the
- * radius; outside it, the nearest-point distance decides.
- */
-export function doorWouldCrush(
-  door: Door,
-  playerX: number,
-  playerZ: number,
-  radius: number,
-): boolean {
+/** Whether a capsule of `radius` at (playerX, playerZ) overlaps the travel
+ * volume. A centre inside the box always counts, whatever the radius. */
+export function doorWouldCrush(door: Door, playerX: number, playerZ: number, radius: number): boolean {
   const volume = doorTravelVolume(door);
   const nearestX = clamp(playerX, volume.minX, volume.maxX);
   const nearestZ = clamp(playerZ, volume.minZ, volume.maxZ);
@@ -65,14 +51,9 @@ export function doorWouldCrush(
   return distanceSq < radius * radius - CRUSH_EPSILON;
 }
 
-/**
- * The gate the render layer registers (FR-015). It reads the player through the
- * supplied accessor at the moment it is asked, so the live position crosses the
- * DOM line as a closure rather than as an import this module would need.
- *
- * It answers only the `close` phase: a player standing in a doorway must not be
- * able to stop the door from opening, only from closing on them.
- */
+/** The gate the render layer registers (FR-015), the live player crossing the DOM
+ * line as a closure. It answers the `close` phase only: standing in a doorway
+ * stops a door closing on you, never stops it opening. */
 export function createCrushGate(readPlayer: () => PlayerCapsule | null): DoorGate {
   return ({ door, phase }) => {
     if (phase !== 'close') return null;

@@ -1,13 +1,6 @@
-// The door state machine: `closed`, `opening`, `open`, `closing`, advanced by
-// accumulated milliseconds rather than by frame count (FR-001, FR-002).
-//
-// Nothing here knows what a frame is. `stepDoor` takes elapsed milliseconds and
-// returns state; the render layer reads `progress` and moves a mesh. That is
-// what makes eight of US1's nine acceptance scenarios assertable under vitest,
-// and it is the pattern M5's guard AI reuses.
-//
-// Pure: no DOM, no three.js. Player position, when the crush test needs it,
-// arrives as an argument or through a registered gate — never from a global.
+// The door state machine — `closed`, `opening`, `open`, `closing` — advanced by
+// accumulated milliseconds, never by frame count (FR-001, FR-002). Pure: no DOM,
+// no three.js; the player position arrives as an argument or through a gate.
 
 import type { LockKind } from '../level';
 import type { InteractOutcome } from './outcomes';
@@ -20,10 +13,9 @@ export const DOOR_STATES = ['closed', 'opening', 'open', 'closing'] as const;
 
 export type DoorState = (typeof DOOR_STATES)[number];
 
-/** The axis the leaf slides along: the axis of the door's two solid neighbours. */
+/** The axis the leaf slides along: that of the door's two solid neighbours. */
 export type DoorAxis = 'x' | 'z';
 
-/** Which way along that axis the leaf retracts. */
 export type DoorDirection = 1 | -1;
 
 export interface TileCoord {
@@ -32,16 +24,10 @@ export interface TileCoord {
 }
 
 export interface Door {
-  /** The door's own tile, in grid coordinates. */
   readonly x: number;
   readonly z: number;
   readonly axis: DoorAxis;
   readonly direction: DoorDirection;
-  /**
-   * The key kind this door demands, from 002's door-lock table. US1 never reads
-   * it; it is declared here so US2's lock gate has somewhere to look without
-   * reopening this file.
-   */
   readonly lock: LockKind;
   state: DoorState;
   /** Travel fraction: 0 fully closed, 1 fully retracted. */
@@ -58,7 +44,6 @@ export interface CreateDoorOptions {
   lock?: LockKind;
 }
 
-/** The player's footprint, passed in by the caller that owns it. */
 export interface PlayerCapsule {
   x: number;
   z: number;
@@ -71,7 +56,6 @@ export interface DoorStepOptions {
 }
 
 export interface DoorStepResult {
-  /** Outcomes this step produced, in order. Empty when nothing was reported. */
   outcomes: InteractOutcome[];
 }
 
@@ -88,7 +72,6 @@ export function createDoor(options: CreateDoorOptions): Door {
   };
 }
 
-/** The tile the leaf retracts into — the recess in the wall beside the door. */
 export function doorDestinationTile(door: Door): TileCoord {
   const offset = DOOR_TRAVEL_TILES * door.direction;
   return door.axis === 'x'
@@ -96,22 +79,16 @@ export function doorDestinationTile(door: Door): TileCoord {
     : { x: door.x, z: door.z + offset };
 }
 
-/** The tiles a door's leaf occupies at any point in its travel: its own and the recess. */
 export function doorVolumeTiles(door: Door): TileCoord[] {
   return [{ x: door.x, z: door.z }, doorDestinationTile(door)];
 }
 
-/** Whether the door's tile is currently passable. Only a fully open door is. */
 export function isDoorPassable(door: Door): boolean {
   return door.state === 'open';
 }
 
-/**
- * The refusal that stops a close, or null when the leaf is free to travel. The
- * capsule handed in is checked directly (so a test needs no registry), and the
- * registered gates are asked as well (so the render layer can supply the live
- * player without this module ever reading a global).
- */
+// The capsule handed in is checked directly, so a test needs no registry; the
+// gates are asked too, so the render layer supplies the live player (FR-015).
 function closeRefusal(door: Door, player: PlayerCapsule | null | undefined): InteractOutcome | null {
   if (player != null && doorWouldCrush(door, player.x, player.z, player.radius)) {
     return 'crush-reversed';
@@ -119,23 +96,13 @@ function closeRefusal(door: Door, player: PlayerCapsule | null | undefined): Int
   return firstRefusal(door, 'close');
 }
 
-// A single clamped delta can carry a door across several transitions — opening
-// to open, dwell expiry to closing — so integration is a residual loop rather
-// than one assignment. The cap is a backstop against a pathological cycle; the
-// real bound is that a clamped step is far shorter than the dwell.
+// One clamped delta can carry a door across several transitions, so integration
+// is a residual loop. The cap is a backstop against a pathological cycle.
 const MAX_TRANSITIONS_PER_STEP = 32;
 
-/**
- * Advances a door by `deltaMs` of wall-clock time (FR-002). The delta is clamped
- * to `MAX_STEP_MS` before any integration, and the remainder is consumed one
- * state at a time, so no transition the door should have reported is skipped
- * (US1-S8).
- */
-export function stepDoor(
-  door: Door,
-  deltaMs: number,
-  options: DoorStepOptions = {},
-): DoorStepResult {
+/** Advances a door by `deltaMs` (FR-002): the delta is clamped to `MAX_STEP_MS`,
+ * then consumed one state at a time, so no transition is skipped (US1-S8). */
+export function stepDoor(door: Door, deltaMs: number, options: DoorStepOptions = {}): DoorStepResult {
   const outcomes: InteractOutcome[] = [];
   if (!Number.isFinite(deltaMs) || deltaMs <= 0) return { outcomes };
 
@@ -199,21 +166,16 @@ export function stepDoor(
   return { outcomes };
 }
 
-/**
- * Resolves one interact command against one door (FR-003, FR-004, FR-006).
- * Every path returns a declared outcome; there is no silent branch.
- *
- * The neighbour rule (FR-016) is not decided here — it is a fact about two
- * doors, so `door-field.ts` applies it before delegating to this function.
- */
+/** Resolves one interact command against one door (FR-003, FR-004, FR-006): every
+ * path returns a declared outcome. The neighbour rule (FR-016) is a fact about
+ * two doors, so `door-field.ts` applies it first. */
 export function interactDoor(door: Door): InteractOutcome {
   switch (door.state) {
     case 'opening':
       // A moving door does not reverse and does not re-trigger (US1-S5).
       return 'blocked-moving';
     case 'closing':
-      // It finishes closing first; it cannot be re-opened until it reports
-      // `closed` (US1-S6).
+      // It cannot be re-opened until it reports `closed` (US1-S6).
       return 'refusing-closing';
     case 'open': {
       // A player lingering in the doorway pushes the auto-close back (US1-S7).

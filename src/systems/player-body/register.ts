@@ -16,9 +16,8 @@ import { installPlayerDrive } from '../../player/drive-hook';
 import { liveOpenTiles } from '../../interaction/open-state';
 import type { OpenState } from '../../player/tiles';
 
-// The live open state: a door or secret blocks until its own system publishes
-// its tile as passable (004 FR-016, 003 FR-007). The signature is unchanged —
-// 003 already took open state as an argument.
+// The live open state: a door or secret blocks until its own system publishes it
+// as passable (004 FR-016, 003 FR-007) — 003 already took open state as an arg.
 const OPEN_STATE: OpenState = liveOpenTiles;
 
 let playerDiag: PlayerDiagnostics | null = null;

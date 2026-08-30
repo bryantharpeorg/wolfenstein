@@ -6,7 +6,9 @@ import { DOOR_TRAVEL_MS, DOOR_DWELL_MS } from '../../src/interaction/params';
 
 const RADIUS = 0.3;
 
-function advance(door: Door, totalMs: number, tickMs = 100, player?: { x: number; z: number; radius: number }): void {
+type Capsule = { x: number; z: number; radius: number };
+
+function advance(door: Door, totalMs: number, tickMs = 100, player?: Capsule): void {
   let remaining = totalMs;
   while (remaining > 1e-9) {
     const step = Math.min(tickMs, remaining);
@@ -102,11 +104,7 @@ describe('a closing door reverses rather than crushing the player (FR-015, Edge 
 
 describe('the crush gate registered by the render layer (FR-015)', () => {
   it('reverses a closing door through the gate registry', () => {
-    let player: { x: number; z: number; radius: number } | null = {
-      x: 4.5,
-      z: 4.5,
-      radius: RADIUS,
-    };
+    let player: Capsule | null = { x: 4.5, z: 4.5, radius: RADIUS };
     const door = closingDoor();
     registerDoorGate(createCrushGate(() => player));
 

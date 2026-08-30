@@ -6,9 +6,8 @@ import {
   commandForEvent,
 } from '../../src/interaction/bindings';
 
-// FR-005: interact is bound to Space and E through one command path. The binding
-// is data — a single table both key codes resolve through — so there is no way
-// to add a second handler without deleting this test.
+// FR-005: the binding is data — one table both key codes resolve through — so a
+// second handler cannot be added without deleting this test.
 
 describe('the interact binding (FR-005)', () => {
   it('maps Space to the interact command', () => {

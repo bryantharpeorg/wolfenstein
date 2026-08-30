@@ -4,11 +4,8 @@ import { LEVEL_GRID } from '../../src/level';
 import { buildDoorField } from '../../src/interaction/door-field';
 import { isDoorTileGeometry } from '../../src/systems/doors/static-faces';
 
-// The doors system hides the faces 002 emitted for the `D` tiles, because those
-// are the closed door drawn as wall and the moving leaf replaces them. It has to
-// recognise that merged group rather than be handed it, so this asserts the
-// recognition against 002's real output: exactly one group matches, and it is
-// the door group.
+// The doors system must recognise 002's `D` wall group rather than be handed it,
+// so this asserts the recognition against 002's real output.
 
 const doors = buildDoorField(LEVEL_GRID).doors;
 const faces = emitFaces(LEVEL_GRID);
