@@ -37,6 +37,7 @@ import {
   type InteractionDiagnostics,
 } from '../../interaction/interaction-diag';
 import { buildDoorwayShell } from './doorway-mesh';
+import { isDoorTileGeometry } from './static-faces';
 
 // Flat colours, per Constitution II: the door leaf and the recess it slides
 // into are geometry and colour, never an imported texture. M4 re-skins these
@@ -45,8 +46,6 @@ const LEAF_COLOR = 0xb07a2c;
 const SHELL_COLOR = 0x6f6f6f;
 
 const DOOR_HEIGHT = CEILING_Y - FLOOR_Y;
-/** A vertex on a door tile's boundary still counts as belonging to that tile. */
-const TILE_EPSILON = 1e-4;
 
 let field: DoorField | null = null;
 let interaction: InteractionDiagnostics | null = null;
@@ -78,24 +77,11 @@ function leafPosition(door: Door): { x: number; z: number } {
  * into 002's build order, which is not this story's to depend on.
  */
 function hideStaticDoorFaces(scene: Object3D, doors: readonly Door[]): void {
-  if (doors.length === 0) return;
   for (const child of scene.children) {
     if (!(child instanceof Mesh)) continue;
     const positions = child.geometry.getAttribute('position');
-    if (positions == null || positions.count === 0) continue;
-    let allOnDoorTiles = true;
-    for (let i = 0; i < positions.count && allOnDoorTiles; i += 1) {
-      const x = positions.getX(i);
-      const z = positions.getZ(i);
-      allOnDoorTiles = doors.some(
-        (door) =>
-          x >= door.x - TILE_EPSILON &&
-          x <= door.x + TILE_SIZE + TILE_EPSILON &&
-          z >= door.z - TILE_EPSILON &&
-          z <= door.z + TILE_SIZE + TILE_EPSILON,
-      );
-    }
-    if (allOnDoorTiles) child.visible = false;
+    if (positions == null) continue;
+    if (isDoorTileGeometry(positions.array, doors)) child.visible = false;
   }
 }
 
@@ -133,6 +119,8 @@ defineSystem({
     // A fully open door stops blocking 003's collider (FR-016, US1-S2).
     registerOpenTileProvider(() => openDoorTiles(built));
 
+    // Before buildMeshes, not after: the doorway shell's own vertices all lie on
+    // door tiles, so it would match the same predicate.
     hideStaticDoorFaces(ctx.scene, built.doors);
     buildMeshes(ctx, built.doors);
 
