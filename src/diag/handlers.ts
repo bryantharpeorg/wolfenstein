@@ -7,6 +7,11 @@ export function attachErrorHandlers(diag: Diagnostics): void {
     return false;
   };
 
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason instanceof Error ? event.reason.message : String(event.reason ?? 'unhandled rejection');
+    diag.errors.push(reason);
+  });
+
   const originalConsoleError = console.error;
   console.error = (...args: unknown[]) => {
     originalConsoleError.apply(console, args);

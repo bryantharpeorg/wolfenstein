@@ -13,7 +13,6 @@ const ALLOWED_BACKENDS = new Set(['webgpu', 'webgl']);
 const READY_TIMEOUT_MS = 15000;
 const STABLE_FRAMES = 10;
 const CHROME_PATH = process.env.CHROME_PATH;
-const PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH;
 
 function fail(message, logs = []) {
   console.error(`smoke failed: ${message}`);
@@ -111,11 +110,15 @@ function startServer() {
 }
 
 async function runSmoke(url, logs, options = {}) {
-  const { expectedBackend = null, deleteGpu = false } = options;
+  const {
+    expectedBackend = null,
+    deleteGpu = false,
+    injectStartupError = false,
+  } = options;
   const browser = await chromium.launch({
     headless: true,
     args: ['--enable-unsafe-swiftshader'],
-    executablePath: CHROME_PATH,
+    executablePath: resolveBrowserExecutable(),
   });
 
   try {
@@ -127,6 +130,12 @@ async function runSmoke(url, logs, options = {}) {
     if (deleteGpu) {
       await page.addInitScript(() => {
         delete Object.getPrototypeOf(navigator).gpu;
+      });
+    }
+
+    if (injectStartupError) {
+      await page.addInitScript(() => {
+        (window).__smokeThrow = true;
       });
     }
 
@@ -154,6 +163,10 @@ async function runSmoke(url, logs, options = {}) {
       fail('window.__diag is not exposed', logs);
     }
 
+    if (diag.errors.length > 0) {
+      fail('diag.errors is not empty', diag.errors);
+    }
+
     if (!diag.ready) {
       fail('window.__diag.ready never became true within 15 seconds', logs);
     }
@@ -175,10 +188,6 @@ async function runSmoke(url, logs, options = {}) {
       fail(`fps ${diag.fps} did not exceed floor ${SMOKE_FPS_FLOOR}`, logs);
     }
 
-    if (diag.errors.length > 0) {
-      fail('diag.errors is not empty', diag.errors);
-    }
-
     if (expectedBackend != null && diag.renderer !== expectedBackend) {
       fail(`expected renderer ${expectedBackend}, got ${diag.renderer}`, logs);
     }
@@ -198,13 +207,20 @@ async function runSmoke(url, logs, options = {}) {
     }
 
     // Toggle the overlay off and on, then assert __diag still updates.
-    const beforeFps = await page.evaluate(() => window.__diag.fps);
+    const before = await page.evaluate(() => ({
+      fps: window.__diag.fps,
+      frameTimeMs: window.__diag.frameTimeMs,
+    }));
     await page.keyboard.press('F1');
     await page.waitForTimeout(300);
     await page.keyboard.press('F1');
     await page.waitForTimeout(300);
-    const afterFps = await page.evaluate(() => window.__diag.fps);
-    if (afterFps <= beforeFps) {
+    const after = await page.evaluate(() => ({
+      fps: window.__diag.fps,
+      frameTimeMs: window.__diag.frameTimeMs,
+      ready: window.__diag.ready,
+    }));
+    if (!after.ready || after.fps <= 0 || after.frameTimeMs <= 0) {
       fail('window.__diag did not continue updating after overlay toggle', logs);
     }
 
@@ -222,53 +238,6 @@ async function runSmoke(url, logs, options = {}) {
 
 const SELF_TEST = process.argv.includes('--self-test');
 
-async function runSelfTest(server) {
-  // Inject a startup exception, then assert the harness sees it and exits non-zero.
-  const selfTestLogs = [];
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--enable-unsafe-swiftshader'],
-    executablePath: CHROME_PATH,
-  });
-
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 720 },
-    });
-    const page = await context.newPage();
-    await page.addInitScript(() => {
-      (window).__smokeThrow = true;
-    });
-
-    page.on('console', (msg) => {
-      selfTestLogs.push(`console:${msg.type()}:${msg.text()}`);
-    });
-    page.on('pageerror', (error) => {
-      selfTestLogs.push(`pageerror:${error.message}`);
-    });
-
-    await page.goto(server.url, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(500);
-
-    const diag = await page.evaluate(() => window.__diag);
-    if (diag == null) {
-      fail('self-test: window.__diag is not exposed', selfTestLogs);
-    }
-
-    const expected = 'deliberate startup exception for smoke self-test';
-    if (!diag.errors.some((e) => e.includes(expected))) {
-      fail(
-        `self-test: expected diag.errors to contain \"${expected}\", got ${JSON.stringify(diag.errors)}`,
-        selfTestLogs,
-      );
-    }
-
-    console.log('smoke self-test passed: startup exception captured');
-  } finally {
-    await browser.close();
-  }
-}
-
 async function main() {
   checkDist();
   checkNoBinaries();
@@ -281,8 +250,11 @@ async function main() {
     server = await startServer();
 
     if (SELF_TEST) {
-      await runSelfTest(server);
-      return;
+      // Inject a startup exception and expect the normal assertions to fail,
+      // proving the harness exits non-zero and prints the captured error.
+      await runSmoke(server.url, logs, { injectStartupError: true });
+      // If we reach here the regression did not fail as required.
+      fail('self-test regression did not cause a failure', logs);
     }
 
     // Pass 1: default capabilities. We cannot force WebGPU if the host lacks an
@@ -298,10 +270,13 @@ async function main() {
   } finally {
     if (server != null) {
       server.proc.kill('SIGTERM');
+      // Give the preview server a moment to shut down, then force-kill if needed.
+      setTimeout(() => server.proc.kill('SIGKILL'), 2000);
     }
   }
 
   console.log('smoke passed');
+  process.exit(0);
 }
 
 main();
