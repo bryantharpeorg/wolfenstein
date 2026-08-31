@@ -16,10 +16,9 @@ export interface Diagnostics {
   enemies: readonly EnemyDiagnosticsRecord[];
   /** Guards whose state is not `death` (006 FR-011). */
   enemiesAlive: number;
-  /** Named spawn-marker faults (006 FR-006, US3-S7). Empty on a sound level.
-   *  Deliberately not `errors`: 001 owns that array and its meaning is
-   *  "something threw", while a marker on a wall cell is a level fault with
-   *  coordinates. `tools/smoke-checks/enemies.mjs` fails the gate on this one. */
+  /** Named spawn-marker faults (006 FR-006, US3-S7), empty on a sound level.
+   *  Deliberately not `errors`, which 001 owns and which means "something
+   *  threw"; `tools/smoke-checks/enemies.mjs` fails the gate on this one. */
   enemySpawnErrors: string[];
 }
 

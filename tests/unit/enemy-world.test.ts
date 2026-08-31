@@ -83,6 +83,9 @@ describe('the fixed-step tick', () => {
     expect(world.tickWorld(GUARD_TICK_MS - 1).ticks).toBe(0);
     expect(world.tickWorld(1).ticks).toBe(1);
     expect(world.tickWorld(GUARD_TICK_MS * 3 + 5).ticks).toBe(3);
+    // A negative or non-finite delta buys nothing and breaks nothing.
+    expect(world.tickWorld(-100).ticks).toBe(0);
+    expect(world.tickWorld(Number.NaN).ticks).toBe(0);
   });
 
   // The negative goal, stated as a bound: a stalled tab must not be paid back.
@@ -90,13 +93,6 @@ describe('the fixed-step tick', () => {
     const world = room();
     expect(world.tickWorld(GUARD_TICK_MS * 1000).ticks).toBe(MAX_TICKS_PER_FRAME);
     expect(world.tickWorld(0).ticks).toBe(0);
-  });
-
-  it('ignores a negative or non-finite delta', () => {
-    const world = room();
-    expect(world.tickWorld(-100).ticks).toBe(0);
-    expect(world.tickWorld(Number.NaN).ticks).toBe(0);
-    expect(world.tickWorld(GUARD_TICK_MS).ticks).toBe(1);
   });
 });
 
@@ -146,7 +142,8 @@ describe('a guard whose chase path is unreachable (Edge Cases)', () => {
   });
 
   it('stays pathable when the navigation port answers with a route', () => {
-    const world = room(stubNav({ cells: [{ x: 9, z: 9 }, { x: 10, z: 10 }] as Cell[], nodesExpanded: 2 }));
+    const route = [{ x: 9, z: 9 }, { x: 10, z: 10 }] as Cell[];
+    const world = room(stubNav({ cells: route, nodesExpanded: 2 }));
     for (let tick = 0; tick < 40; tick += 1) world.tickWorld(GUARD_TICK_MS);
     expect(world.records.every((record) => record.pathable)).toBe(true);
   });

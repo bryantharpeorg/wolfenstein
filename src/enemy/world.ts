@@ -28,14 +28,12 @@ import type { GuardState } from './states';
 import { createRng } from './rng';
 import type { Rng } from './rng';
 
-/** The guard AI's fixed step. 20 Hz: fast enough that a chase reads as pursuit,
- *  slow enough that ten guards' pathing is a rounding error on a 60 Hz frame. */
+/** 20 Hz: fast enough that a chase reads as pursuit, slow enough that ten
+ *  guards' pathing is a rounding error on a 60 Hz frame. Past
+ *  `MAX_TICKS_PER_FRAME` steps of catch-up the backlog is dropped, and one seed
+ *  derives every guard's generator so a run repeats. */
 export const GUARD_TICK_MS = 50;
-
-/** The most steps one frame may pay back. Past this the backlog is dropped. */
 export const MAX_TICKS_PER_FRAME = 4;
-
-/** The seed each guard's own generator is derived from, so a run repeats. */
 export const GUARD_WORLD_SEED = 0x77726c64;
 
 /** One live guard: US1's immutable record, replaced each tick, plus what the
@@ -53,7 +51,7 @@ export interface GuardRecord {
   state: GuardState;
 }
 
-/** The per-guard shape the page publishes as `__diag.enemies` (FR-011). */
+/** The shape published per guard as `__diag.enemies` (FR-011). */
 export interface EnemyDiagnosticsRecord {
   state: GuardState;
   viewAngle: number;
