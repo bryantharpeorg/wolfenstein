@@ -7,10 +7,11 @@
 // (FR-010, FR-011, US4-S2, US4-S4..S8, SC-005). The camera moves through
 // `window.__enemyView`, the seam `src/systems/enemy-billboards/register.ts` installs
 // for this — 003's `window.__playerDrive` counterpart — so no synthetic mouse input.
+//
+// Default-exported, returning the failures: the contract `tools/smoke-check-runner.mjs`
+// discovers.
 
-export const description = 'orbits the camera around a guard and reads eight distinct view angles';
-
-export async function run({ page }) {
+export default async function enemyOrbitCheck({ page }) {
   const errors = [];
   const check = (ok, message) => {
     if (!ok) errors.push(message);
@@ -125,8 +126,15 @@ export async function run({ page }) {
     await window.__waitFrames(2);
 
     const before = window.__diag.enemiesAlive;
-    window.__diag.enemies[0].state = 'death';
-    await window.__waitFrames(2);
+    // Through US3's damage seam, the way a shot kills: the world runs the guard into
+    // `death` on its own tick, so this asserts the shipped path and not a poked field.
+    view.kill(0);
+    for (let i = 0; i < 120 && window.__diag.enemies[0].state !== 'death'; i += 1) {
+      await window.__waitFrames(1);
+    }
+    // Read in the same turn the state change is seen, before the first death frame
+    // has had its declared slice of the duration to advance.
+    const state = window.__diag.enemies[0].state;
     const first = view.frames()[0];
     const after = window.__diag.enemiesAlive;
 
@@ -134,10 +142,11 @@ export async function run({ page }) {
     while (performance.now() < deadline) await window.__waitFrames(4);
     const held = view.frames()[0];
     view.release();
-    return { before, after, first, held };
+    return { before, after, first, held, state };
   }, sheet.deathDurationMs);
 
   const last = sheet.deathFrames[sheet.deathFrames.length - 1];
+  check(death.state === 'death', `the damaged guard never reached death (state '${death.state}')`);
   check(death.first === sheet.deathFrames[0], `death opened on '${death.first}', not '${sheet.deathFrames[0]}'`);
   check(death.held === last, `death ended holding '${death.held}', not the final frame '${last}'`);
   check(death.after === death.before - 1, `enemiesAlive is ${death.after} after a death, not ${death.before - 1}`);
