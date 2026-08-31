@@ -4,7 +4,8 @@
 // last so `setup` finds the HUD (90) and the stats screen (95) already there. The HUD and the
 // stats screen composite *above* the effects, because a grain-covered ammo counter is not a
 // readout (US4-S10); the view-model and its muzzle flash go *through*, which is the whole of
-// US4-S6 — one layer, so the frame is two renders of one scene rather than two scenes.
+// US4-S6 — one layer, so a composited frame is two renders of one scene rather than two
+// scenes, and a frame with the chain idle is the single render it always was.
 
 import { defineSystem, type GameContext } from '../../boot/registry';
 import { createPostChain, readDrawCalls, type PostChain } from '../../post/chain';
@@ -114,14 +115,22 @@ function renderPostFrame(frame: FrameRenderContext): void {
   }
 
   try {
-    camera.layers.set(WORLD_LAYER);
-    if (chain != null && chain.active()) {
-      chain.renderWorld();
-      sceneDrawCalls = chain.sceneDrawCalls();
-    } else {
+    // With no chain in the way there is nothing to composite *over*, so the frame is one render
+    // of every layer — exactly the frame 007 drew, at exactly the cost 007 paid. Splitting it in
+    // two whatever the chain is doing would make the page with all four effects off slower than
+    // the page before this spec, which is the one thing FR-017 does not allow (US4-S5).
+    if (chain == null || !chain.active()) {
+      camera.layers.set(WORLD_LAYER);
+      if (overlays > 0) camera.layers.enable(OVERLAY_LAYER);
       renderer.render(frame.scene, camera);
       sceneDrawCalls = readDrawCalls(renderer);
+      frameDrawCalls = sceneDrawCalls;
+      return;
     }
+
+    camera.layers.set(WORLD_LAYER);
+    chain.renderWorld();
+    sceneDrawCalls = chain.sceneDrawCalls();
 
     if (overlays > 0) {
       const before = readDrawCalls(renderer);

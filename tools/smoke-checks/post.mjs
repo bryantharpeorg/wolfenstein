@@ -50,6 +50,14 @@ const tap = async (page, code) => {
   await key(page, 'keyup', code);
 };
 
+/** Waits for a condition rather than for a count of frames. A frame is not a unit of time here:
+ *  the pass with bloom on runs at a quarter of the frame rate of the pass without it, so the
+ *  same `frames(45)` settle is a second on one machine and five seconds on another — and five
+ *  seconds standing still under fire is how the player ends up dead before the flash is ever
+ *  sampled. Every wait below is on the thing actually being waited for. */
+const until = (page, predicate, argument) =>
+  page.waitForFunction(predicate, argument, { timeout: 30000 });
+
 /** The composited page, measured; the screenshot is decoded by the browser that produced it,
  *  so no image decoder enters the repository (Constitution I, II). */
 async function luminance(page, clip) {
@@ -78,28 +86,60 @@ async function luminance(page, clip) {
 const FLASH_CLIP = { x: 680, y: 340, width: 220, height: 200 };
 const HUD_CLIP = { x: 380, y: 660, width: 520, height: 56 };
 
+/** How many lit/unlit pairs each pass keeps, and how many tries it gets to keep them. A sample
+ *  whose screenshot did not land on a firing frame is discarded rather than averaged in, so the
+ *  retries are what stop that discard from silently shrinking the evidence. */
+const FLASH_SAMPLES = 3;
+const FLASH_ATTEMPTS = FLASH_SAMPLES * 3;
+
 /** Fires the chaingun and answers the brightest frame around the muzzle plus the same region
- *  unlit, so a bloom claim is a difference rather than a level. */
+ *  unlit, so a bloom claim is a difference rather than a level.
+ *
+ *  Every sample is its own short run. The restart is inside the loop, not before it, because
+ *  the guards outside keep firing while this measures: a pass that spends five seconds settling
+ *  and screenshotting is a pass whose player is dead by the last sample, and a dead player fires
+ *  nothing, lights nothing, and reads as "bloom made the flash darker". The restart puts health
+ *  and the magazine back, and each sample is then only as long as one shot and one screenshot.
+ *  A sample is kept only if the page was alive and the muzzle was lit when it was taken. */
 async function flashLuminance(page, bloomOn) {
   await page.evaluate((on) => {
     window.__post.setAll(false);
     window.__post.set('bloom', on);
   }, bloomOn);
-  // A restart puts the magazine back, so both passes fire with the same ammunition.
-  await tap(page, 'KeyR');
-  await frames(page, 20);
-  await tap(page, 'Digit3');
-  await frames(page, 25);
 
-  await key(page, 'keydown', 'ControlLeft');
-  await frames(page, 5);
   let lit = 0;
-  for (let sample = 0; sample < 4; sample += 1) lit = Math.max(lit, await luminance(page, FLASH_CLIP));
-  await key(page, 'keyup', 'ControlLeft');
-  await frames(page, 25);
-  const dark = await luminance(page, FLASH_CLIP);
-  const ammo = await page.evaluate(() => window.__diag.combat.ammo.chaingun);
-  return { lit, dark, ammo };
+  let dark = 0;
+  let ammo = 0;
+  let kept = 0;
+  for (let attempt = 0; attempt < FLASH_ATTEMPTS && kept < FLASH_SAMPLES; attempt += 1) {
+    const restarts = await page.evaluate(() => window.__diag.combat.restarts);
+    await tap(page, 'KeyR');
+    await until(page, (was) => window.__diag.combat.restarts > was
+      && window.__diag.run != null && window.__diag.run.state === 'playing', restarts);
+
+    await tap(page, 'Digit3');
+    const fired = await page.evaluate(() => window.__diag.combat.shotsFired);
+    await key(page, 'keydown', 'ControlLeft');
+    // 007's switch delay, waited out by the shot it delays rather than by a frame count.
+    await until(page, (was) => window.__diag.combat.shotsFired > was, fired);
+
+    const flash = await luminance(page, FLASH_CLIP);
+    const during = await page.evaluate(() => ({
+      alive: window.__diag.run.state === 'playing',
+      flashing: window.__diag.combat.muzzleFlash > 0,
+      ammo: window.__diag.combat.ammo.chaingun,
+    }));
+    await key(page, 'keyup', 'ControlLeft');
+    await until(page, () => window.__diag.combat.muzzleFlash === 0);
+    const unlit = await luminance(page, FLASH_CLIP);
+
+    if (!during.alive || !during.flashing) continue;
+    lit = Math.max(lit, flash);
+    dark = Math.max(dark, unlit);
+    ammo = during.ammo;
+    kept += 1;
+  }
+  return { lit, dark, ammo, kept };
 }
 
 export default async function check({ page, root }) {
@@ -232,6 +272,9 @@ export default async function check({ page, root }) {
   // --- US4-S6: bloom reaches the muzzle flash. Constructed is not applied.
   const plain = await flashLuminance(page, false);
   const bloomed = await flashLuminance(page, true);
+  need(plain.kept === FLASH_SAMPLES && bloomed.kept === FLASH_SAMPLES,
+    `only ${plain.kept} of ${FLASH_SAMPLES} flash samples without bloom and ${bloomed.kept} with ` +
+      '— the page was dead or not firing when the shutter opened');
   need(plain.ammo > 0 && bloomed.ammo > 0, 'the chaingun ran dry before the flash was measured');
   need(plain.lit > plain.dark, 'no muzzle flash was measured: the lit region is no brighter');
   need(bloomed.lit > plain.lit,
@@ -240,6 +283,11 @@ export default async function check({ page, root }) {
   // And it is the *flash* bloom found, not a uniformly brighter frame.
   need(bloomed.lit - bloomed.dark > plain.lit - plain.dark,
     "bloom did not increase the flash's excess over the same region unlit");
+  // Printed, not just asserted: US4-S4 made the chain's cost a figure, and the margin the bloom
+  // claim passes by deserves the same treatment — a pass that squeaked through reads as a pass.
+  console.log(`  post: flash ${plain.lit.toFixed(1)} over ${plain.dark.toFixed(1)} unlit, ` +
+    `${bloomed.lit.toFixed(1)} over ${bloomed.dark.toFixed(1)} with bloom; ` +
+    `frameCostMs ${on.post.frameCostMs.toFixed(2)}, fps ${off.fps.toFixed(1)} with all four off`);
 
   // --- FR-018: nothing in the post path reached the console.
   const fromPost = consoleErrors.filter((text) =>

@@ -19,15 +19,22 @@ export interface PostEffectDeclaration {
 
 /** Digits 5-8 are free: 007 took 1-3, 001's overlay F1, 004 and US2 E and R. Bloom's threshold
  *  sits above the lit walls and below the flash's additive core, so what blooms is the flash
- *  (US4-S6). The defaults are argued in `DECISIONS.md`. */
+ *  (US4-S6).
+ *
+ *  All four start off, which is FR-017 read literally: the floor is promised *with all four
+ *  disabled*, and 001's harness asserts that same floor against the page's defaults, so the
+ *  two agree only when the defaults are the disabled state. It is also the story's own first
+ *  clause — effects are for hardware that has the budget for them — and it makes the frame the
+ *  player is handed byte-for-byte the frame 007 shipped. Each is one key away. See
+ *  `DECISIONS.md`. */
 export const POST_EFFECTS = {
-  bloom: { id: 'bloom', enabledByDefault: true, keyCode: 'Digit5',
+  bloom: { id: 'bloom', enabledByDefault: false, keyCode: 'Digit5',
     tuning: { strength: 0.7, radius: 0.4, threshold: 0.82 } },
   ssao: { id: 'ssao', enabledByDefault: false, keyCode: 'Digit6',
     tuning: { radius: 0.25, minDistance: 0.002, maxDistance: 0.1 } },
   motionBlur: { id: 'motionBlur', enabledByDefault: false, keyCode: 'Digit7',
     tuning: { damp: 0.72 } },
-  filmGrain: { id: 'filmGrain', enabledByDefault: true, keyCode: 'Digit8',
+  filmGrain: { id: 'filmGrain', enabledByDefault: false, keyCode: 'Digit8',
     tuning: { intensity: 0.22 } },
 } as const satisfies Readonly<Record<PostEffectId, PostEffectDeclaration>>;
 
