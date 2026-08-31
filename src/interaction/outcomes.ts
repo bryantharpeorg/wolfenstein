@@ -13,6 +13,11 @@ export const INTERACT_OUTCOMES = [
   'already-open', // a secret already pushed; secrets do not close
   'blocked-geometry', // a secret whose travel path is obstructed
   'no-target', // nothing interactable was in range
+  // 008's elevator, resolved through this same one command path (008 FR-001):
+  // the `E` tile is a thing you use, so it answers here beside the doors.
+  'exit-used', // the elevator accepted the command; the run is now `exiting`
+  'already-exiting', // the elevator has already been used and does not re-trigger
+  'exit-refused-dead', // a player at zero health does not complete the level
 ] as const;
 
 export type InteractOutcome = (typeof INTERACT_OUTCOMES)[number];

@@ -28,6 +28,8 @@ import {
   resetVitals,
   type PlayerVitals,
 } from '../../combat/vitals';
+import { damageApplies } from '../../run/gating';
+import { currentRunState } from '../../run/state';
 import { getLastTickReport } from '../enemies/register';
 
 /** Not a player *command*, so not behind the gate death closes — which is what
@@ -143,6 +145,8 @@ function scoreKills(): void {
  *  the attack module's to compute (FR-009). */
 function takeGuardDamage(): void {
   if (vitals == null) return;
+  // 008's gate (008 FR-003): nothing is applied to a player whose run is over.
+  if (!damageApplies(currentRunState())) return;
   const report = applyDamage(vitals, getLastTickReport().damageToPlayer);
   if (!report.died) return;
 
