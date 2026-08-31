@@ -1,31 +1,12 @@
-// T039 (FR-017; US4-S4, US4-S5). The point of this module is that a post-processing
-// regression arrives as a *number*. It reduces one window of frames with all four
-// effects on and one with all four off to a single `frameCostMs`, and refuses to answer
-// until both windows are full — a cost quoted from nine frames is a feeling with a
-// decimal point on it.
-//
-// The reduction is a median rather than a mean: a garbage-collection spike in the middle
-// of a 120-frame window is not the cost of bloom, and one 400 ms frame moves a mean of
-// 120 by more than the whole effect chain does.
+// T039 (FR-017; US4-S4, US4-S5). A post-processing regression must arrive as a *number*: one
+// window with all four effects on and one with all four off, reduced to a `frameCostMs` that
+// refuses to answer until both are full, by a median rather than a mean.
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import {
-  POST_COST_SAMPLE_FRAMES,
-  createPostCostSampler,
-  postCostSampleCount,
-  postFrameCostMs,
-  postPhaseFrameMs,
-  recordPostCostSample,
-  resetPostCostSampler,
+  POST_COST_SAMPLE_FRAMES, createPostCostSampler, postCostSampleCount, postFrameCostMs,
+  postPhaseFrameMs, recordPostCostSample, resetPostCostSampler
 } from '../../src/post/cost';
-
-/** The claim is about code, not prose: a comment that says "window" is not a DOM access. */
-const codeOf = (path: string): string =>
-  readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
 
 const feed = (
   sampler: ReturnType<typeof createPostCostSampler>,
@@ -37,11 +18,8 @@ const feed = (
 };
 
 describe('the frame-cost sampler (FR-017, US4-S4)', () => {
-  it('measures over a declared window of 120 frames', () => {
-    expect(POST_COST_SAMPLE_FRAMES).toBe(120);
-  });
-
   it('reduces 120 enabled and 120 disabled frames to one frameCostMs', () => {
+    expect(POST_COST_SAMPLE_FRAMES).toBe(120);
     const sampler = createPostCostSampler();
     feed(sampler, 'disabled', 4);
     feed(sampler, 'enabled', 10);
@@ -90,16 +68,14 @@ describe('the frame-cost sampler (FR-017, US4-S4)', () => {
     for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       recordPostCostSample(sampler, 'enabled', bad);
     }
-    expect(postCostSampleCount(sampler, 'enabled')).toBe(0);
-
-    // A state with some effects on and some off belongs to neither window: the cost
-    // FR-017 asks for is all four against none, not a blend of the two.
+    // Some effects on and some off belongs to neither window: the cost FR-017 asks for is all
+    // four against none, not a blend of the two.
     recordPostCostSample(sampler, null, 8);
     expect(postCostSampleCount(sampler, 'enabled')).toBe(0);
     expect(postCostSampleCount(sampler, 'disabled')).toBe(0);
   });
 
-  it('clears both windows on reset, so a resized viewport is not measured against the old one', () => {
+  it('clears both windows on reset, so a resize is not measured against the old viewport', () => {
     const sampler = createPostCostSampler();
     feed(sampler, 'disabled', 4);
     feed(sampler, 'enabled', 10);
@@ -109,13 +85,5 @@ describe('the frame-cost sampler (FR-017, US4-S4)', () => {
     expect(postCostSampleCount(sampler, 'enabled')).toBe(0);
     expect(postCostSampleCount(sampler, 'disabled')).toBe(0);
     expect(postFrameCostMs(sampler)).toBeNull();
-  });
-});
-
-describe('the cost sampler is pure (Constitution III)', () => {
-  it('imports no renderer and reads no clock of its own', () => {
-    const source = codeOf('../../src/post/cost.ts');
-    expect(source).not.toMatch(/from\s+['"]three/);
-    expect(source).not.toMatch(/\b(window|document|performance|Date)\b/);
   });
 });

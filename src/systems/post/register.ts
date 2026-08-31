@@ -1,54 +1,29 @@
-// The post system (order 200): the render edge of US4 (FR-014, FR-015, FR-017, FR-018).
-// Every decision lives in `src/post/` -- the four effects and their defaults in
-// `state.ts`, the measurement in `cost.ts`, the passes in `chain.ts` -- and this file is
-// the wiring: build the chain, bind the four declared keys, forward resizes, keep the
-// readouts above the effects, and publish. 001's glob discovery finds it, so neither
-// `main.ts` nor `diag.ts` is edited by this story beyond the single render indirection.
-//
-// Order 200 is last on purpose: the HUD parents its quad to the camera at 90 and the
-// stats screen at 95, and this system's `setup` has to find both already there.
-//
-// **What goes through the chain and what goes over it.** The HUD readout (render order
-// 1000) and the stats screen (1100) are composited above the effects: a bloomed,
-// grain-covered ammo counter is not a readout, and US4-S10 asks for a legible one. The
-// weapon view-model at 900 and its muzzle flash at 901 go *through* the chain, which is
-// the whole of US4-S6 -- bloom that did not reach the flash was constructed, not applied.
-// The split is one layer: the world renders on layer 0 and the overlays on layer 1, and
-// the frame is two renders rather than two scenes.
+// T047: the render edge of US4 (FR-014, FR-015, FR-017, FR-018) — build the chain, bind the four
+// declared keys, forward resizes, keep the readouts above the effects, publish. 001's glob
+// discovery finds it, so no shared file is edited beyond the render indirection; order 200 is
+// last so `setup` finds the HUD (90) and the stats screen (95) already there. The HUD and the
+// stats screen composite *above* the effects, because a grain-covered ammo counter is not a
+// readout (US4-S10); the view-model and its muzzle flash go *through*, which is the whole of
+// US4-S6 — one layer, so the frame is two renders of one scene rather than two scenes.
 
 import { defineSystem, type GameContext } from '../../boot/registry';
-import { createPostChain } from '../../post/chain';
-import { readDrawCalls, type PostChain } from '../../post/chain-support';
+import { createPostChain, readDrawCalls, type PostChain } from '../../post/chain';
 import {
-  createPostCostSampler,
-  postCostSampleCount,
-  postFrameCostMs,
-  postPhaseFrameMs,
-  recordPostCostSample,
-  resetPostCostSampler,
-  type PostCostPhase,
-  type PostCostSampler,
+  createPostCostSampler, postCostSampleCount, postFrameCostMs,
+  recordPostCostSample, resetPostCostSampler, type PostCostPhase, type PostCostSampler
 } from '../../post/cost';
 import { ensurePostDiag, type PostDiagnostics } from '../../post/diag';
-import { clearFrameRenderer, installFrameRenderer, type FrameRenderContext } from '../../post/render-hook';
 import {
-  POST_EFFECTS,
-  POST_EFFECT_IDS,
-  allPostEffectsRequested,
-  createPostState,
-  disablePostEffect,
-  noPostEffectsRequested,
-  postEffectForKeyCode,
-  postEffectStates,
-  setPostEffect,
-  togglePostEffect,
-  type PostEffectId,
-  type PostState,
+  clearFrameRenderer, installFrameRenderer, type FrameRenderContext
+} from '../../post/render-hook';
+import {
+  POST_EFFECTS, POST_EFFECT_IDS, allPostEffectsRequested, createPostState, disablePostEffect,
+  noPostEffectsRequested, postEffectForKeyCode, postEffectStates, setPostEffect, togglePostEffect,
+  type PostEffectId, type PostState
 } from '../../post/state';
 import { HUD_RENDER_ORDER } from '../hud/register';
 
-/** The world renders on layer 0 -- three's default, so nothing else has to opt in -- and
- *  the screen-space readouts on layer 1. */
+// The world on layer 0 — three's default, so nothing else opts in — readouts on layer 1.
 const WORLD_LAYER = 0;
 const OVERLAY_LAYER = 1;
 
@@ -68,12 +43,10 @@ let sceneDrawCalls = 0;
 let frameDrawCalls = 0;
 let resizes = 0;
 
-/** What the harness reads and drives, in the shape `window.__hud` and `window.__run`
- *  established: a texture cannot be read back, and neither can a shader. */
+/** What the harness drives, in the shape `window.__hud` established: a shader cannot be read
+ *  back, so the states it sets are read from `__diag.post`. */
 export interface PostHarness {
-  effects(): Record<PostEffectId, boolean>;
   set(id: PostEffectId, on: boolean): boolean;
-  toggle(id: PostEffectId): boolean;
   setAll(on: boolean): Record<PostEffectId, boolean>;
   renderTargets(): number;
 }
@@ -84,9 +57,7 @@ declare global {
   }
 }
 
-/** Anything the camera carries at or above the HUD's render order is a readout and
- *  composites above the chain; anything below it -- the view-model and its flash -- goes
- *  through the chain. Rescanned each frame because it is three objects. */
+/** At or above the HUD's order is a readout, composited above the chain; below goes through. */
 function assignOverlayLayers(ctx: GameContext): void {
   let found = 0;
   for (const child of ctx.camera.children) {
@@ -114,8 +85,6 @@ function publish(ctx: GameContext): void {
   post.effects = postEffectStates(state);
   post.active = chain?.active() ?? false;
   post.frameCostMs = postFrameCostMs(sampler);
-  post.enabledFrameMs = postPhaseFrameMs(sampler, 'enabled');
-  post.baselineFrameMs = postPhaseFrameMs(sampler, 'disabled');
   post.costSamples = {
     enabled: postCostSampleCount(sampler, 'enabled'),
     disabled: postCostSampleCount(sampler, 'disabled'),
@@ -125,18 +94,14 @@ function publish(ctx: GameContext): void {
   post.viewport = chain?.size() ?? post.viewport;
   post.resizes = resizes;
   if (post.fallbacks.length !== state.fallbacks.length) post.fallbacks = [...state.fallbacks];
-  // 001's budget is what the *game* draws -- the world plus the readouts over it -- and it
-  // stays that even with eleven bloom passes in the frame, so a composer cannot turn
-  // "under twenty draw calls" into "under twenty full-screen quads". The frame's whole
-  // count, post passes included, is `__diag.post.drawCalls` (US4-S10).
+  // 001's budget is what the *game* draws — the world plus the readouts over it — and stays
+  // that with eleven bloom passes in the frame. The whole count is `post.drawCalls` (US4-S10).
   ctx.diag.drawCalls = sceneDrawCalls;
 }
 
-/**
- * One frame: the world through the chain, then the readouts over it. `renderer.info` is
- * driven by hand because a composer calls `renderer.render` once per pass and each call
- * would otherwise reset the counters that 001's draw-call budget is read from.
- */
+/** One frame: the world through the chain, then the readouts over it. `renderer.info` is driven
+ *  by hand because a composer calls `renderer.render` once per pass, and each call would
+ *  otherwise reset the counters 001's budget is read from. */
 function renderPostFrame(frame: FrameRenderContext): void {
   const renderer = frame.renderer as unknown as RendererLike;
   const camera = frame.camera;
@@ -166,8 +131,7 @@ function renderPostFrame(frame: FrameRenderContext): void {
       renderer.setRenderTarget?.(null);
       renderer.render(frame.scene, camera);
       renderer.autoClear = autoClear;
-      // The readouts are drawn by this story but they are not post-processing: they were
-      // inside 001's budget before the chain existed and they stay inside it.
+      // The readouts were inside 001's budget before the chain existed and stay inside it.
       sceneDrawCalls += readDrawCalls(renderer) - before;
     }
 
@@ -178,8 +142,8 @@ function renderPostFrame(frame: FrameRenderContext): void {
   }
 }
 
-/** The hook's last resort: whatever threw is named against every effect that was on, and
- *  the passthrough takes the frame. Dark is not a report; this is (US4-S3). */
+/** The hook's last resort: whatever threw is named against every effect that was on, and the
+ *  passthrough takes the frame — dark is not a report, this is (US4-S3). */
 function onRenderFailure(ctx: GameContext, error: unknown): void {
   const reason = error instanceof Error ? error.message : String(error);
   for (const id of POST_EFFECT_IDS) disablePostEffect(state, id, ctx.backend, reason);
@@ -200,14 +164,8 @@ function bindToggles(ctx: GameContext): void {
 
 function installHarness(ctx: GameContext): void {
   window.__post = {
-    effects: () => postEffectStates(state),
     set(id, on) {
       const result = setPostEffect(state, id, on);
-      rebuild(ctx);
-      return result;
-    },
-    toggle(id) {
-      const result = togglePostEffect(state, id);
       rebuild(ctx);
       return result;
     },
@@ -263,11 +221,10 @@ defineSystem({
 
   resize(ctx, width, height) {
     resizes += 1;
-    // Within this same frame: `main.ts` calls every system's `resize` from the event, and
-    // the next `renderFrame` already draws into the resized targets (US4-S9).
+    // Within this same frame: `main.ts` calls every system's `resize` from the event, so the
+    // next `renderFrame` already draws into resized targets (US4-S9). A different viewport is
+    // a different frame cost, so the old windows are not a baseline for it.
     chain?.setSize(width, height);
-    // A different viewport is a different frame cost, so the windows measured at the old
-    // one are not a baseline for the new one.
     resetPostCostSampler(sampler);
     publish(ctx);
   },

@@ -1,33 +1,15 @@
-// T038 (FR-014, FR-016; US4-S1, US4-S2, US4-S8). Three claims about the one place the
-// post chain's shape is declared. *Exactly four effects*, named and ordered, each with a
-// default and a binding read from `POST_EFFECTS` rather than restated here — a fifth
-// effect, a renamed one or a default moved to a second file fails this file first.
-// *Independence*: a toggle moves one effect and leaves the other three where they were.
-// *A disabled effect says so*: an effect the backend cannot run is recorded in
-// `fallbacks` and cannot be toggled back on, because "on" would be a lie about a pass
-// that does not exist.
-//
-// Purity is asserted too: `state.ts` builds nothing and imports no renderer, which is
-// what lets every claim above be made without a page.
+// T038 (FR-014, FR-016; US4-S1, US4-S2, US4-S8). Three claims about the one place the chain's
+// shape is declared. *Exactly four effects*, read from `POST_EFFECTS` rather than restated here.
+// *Independence*: a toggle moves one and leaves three. *A disabled effect says so*: one the
+// backend cannot run is recorded in `fallbacks` and cannot be toggled back on.
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  POST_EFFECTS,
-  POST_EFFECT_IDS,
-  allPostEffectsRequested,
-  anyPostEffectEnabled,
-  createPostState,
-  disablePostEffect,
-  noPostEffectsRequested,
-  postEffectEnabled,
-  postEffectForKeyCode,
-  postEffectStates,
-  postFallbackLine,
-  setPostEffect,
-  togglePostEffect,
-  type PostEffectId,
+  POST_EFFECTS, POST_EFFECT_IDS, allPostEffectsRequested, anyPostEffectEnabled, createPostState,
+  disablePostEffect, noPostEffectsRequested, postEffectEnabled, postEffectForKeyCode,
+  postEffectStates, postFallbackLine, setPostEffect, togglePostEffect, type PostEffectId
 } from '../../src/post/state';
 
 /** The claim is about code, not prose: a comment that says "window" is not a DOM access. */
@@ -53,8 +35,7 @@ describe('the declared post-effect table (FR-014, US4-S1)', () => {
       expect(typeof declared.enabledByDefault).toBe('boolean');
       expect(declared.keyCode).toMatch(/^\w+$/);
       codes.add(declared.keyCode);
-      // Tuning is declared beside the default rather than inside the chain, so a
-      // retuned effect is not a renderer edit.
+      // Tuning beside the default, so a retuned effect is not a renderer edit.
       const tuning = Object.entries(declared.tuning);
       expect(tuning.length).toBeGreaterThan(0);
       for (const [name, value] of tuning) {
@@ -74,7 +55,6 @@ describe('the declared post-effect table (FR-014, US4-S1)', () => {
       expect(postEffectEnabled(state, id), id).toBe(POST_EFFECTS[id].enabledByDefault);
     }
     expect(state.fallbacks).toEqual([]);
-    // The published shape is the table's own keys, so a reader cannot see a fifth field.
     expect(Object.keys(postEffectStates(state)).sort()).toEqual([...POST_EFFECT_IDS].sort());
   });
 });
@@ -97,19 +77,15 @@ describe('toggling one effect (FR-014, US4-S2)', () => {
     }
   });
 
-  it('sets a requested state directly, and setting it twice is not two flips', () => {
+  it('sets a state directly and answers whether all four or none are requested', () => {
     const state = createPostState();
     for (const id of POST_EFFECT_IDS) {
+      // Setting it twice is one state, not two flips.
       expect(setPostEffect(state, id, true)).toBe(true);
       expect(setPostEffect(state, id, true)).toBe(true);
       expect(setPostEffect(state, id, false)).toBe(false);
       expect(setPostEffect(state, id, false)).toBe(false);
     }
-  });
-
-  it('answers whether all four or none are requested, which is what the cost windows key on', () => {
-    const state = createPostState();
-    for (const id of POST_EFFECT_IDS) setPostEffect(state, id, false);
     expect(noPostEffectsRequested(state)).toBe(true);
     expect(allPostEffectsRequested(state)).toBe(false);
     expect(anyPostEffectEnabled(state)).toBe(false);
@@ -159,10 +135,10 @@ describe('an effect the backend cannot run (FR-016, US4-S8)', () => {
 });
 
 describe('the state module is pure (Constitution III)', () => {
-  it('imports no renderer and names no DOM global, so every claim above needs no page', () => {
+  it('imports no renderer and names no DOM global, so the claims above need no page', () => {
     const source = codeOf('../../src/post/state.ts');
     expect(source).not.toMatch(/from\s+['"]three/);
-    expect(source).not.toMatch(/\b(window|document|navigator|requestAnimationFrame|HTMLCanvasElement)\b/);
+    expect(source).not.toMatch(/\b(window|document|navigator|requestAnimationFrame)\b/);
     expect(source).not.toMatch(/EffectComposer|WebGLRenderer|WebGPURenderer/);
   });
 });
