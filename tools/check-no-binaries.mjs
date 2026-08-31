@@ -10,6 +10,7 @@ const FORBIDDEN = new Set([
   '.mp3',
   '.wav',
   '.ogg',
+  '.m4a', // 008 FR-009 names four audio extensions; this one the list omitted (T035)
   '.glb',
   '.gltf',
   '.fbx',

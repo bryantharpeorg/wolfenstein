@@ -69,6 +69,7 @@ describe('check-no-binaries', () => {
       'k.fbx',
       'l.ttf',
       'm.woff',
+      'n.m4a', // 008 FR-009 names four audio extensions; this one was omitted (T035)
     ];
     for (const name of forbidden) {
       writeFileSync(join(tmp, name), name);
@@ -78,6 +79,15 @@ describe('check-no-binaries', () => {
     for (const name of forbidden) {
       expect(result.output).toContain(name);
     }
+  });
+
+  it('flags every audio extension FR-009 names, in any case', async () => {
+    // The four the audio story forbids, spelled as a stray asset would be.
+    const names = ['shot.MP3', 'door.Wav', 'step.OGG', 'drone.M4A'];
+    for (const name of names) writeFileSync(join(tmp, name), 'not synthesized');
+    const result = await runChecker(tmp);
+    expect(result.exitCode).toBe(1);
+    for (const name of names) expect(result.output).toContain(name);
   });
 
   it('does not flag node_modules or dist by default in the checked root', async () => {
