@@ -13,10 +13,9 @@ import type { Diagnostics } from '../diag/diag';
 import type { MaterialName } from './table';
 
 /** Which of a material's two derived maps could not be produced (FR-007), or
- * `'binding'` where US3 could not resolve a surface to a declared material and
- * substituted 002's default rather than leaving it untextured (FR-008). Widened
- * rather than duplicated: a degradation is a degradation, and the page shows one
- * list of them. */
+ * `'binding'` where US3 substituted 002's default for an unresolved surface
+ * rather than leave it untextured (FR-008). Widened rather than duplicated: the
+ * page shows one list of degradations. */
 export type MaterialMapKind = 'normal' | 'roughness' | 'binding';
 
 export interface MaterialFallback {
