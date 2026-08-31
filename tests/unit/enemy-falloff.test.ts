@@ -1,8 +1,7 @@
 // T018 (FR-008, US3-S1, US3-S2): the damage curve is a *table*, and every damage
-// number a shot ever deals is read out of it. These assertions are written
-// against the exported breakpoints rather than against literals copied here, so
-// retuning the curve retunes the test with it — what is pinned is the shape:
-// ordered, strictly decreasing, everywhere positive, and exact at a breakpoint.
+// number a shot deals is read out of it. The assertions are written against the
+// exported breakpoints rather than literals copied here, so a retune retunes the
+// test with it — what is pinned is the shape.
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -20,30 +19,30 @@ const first = DAMAGE_FALLOFF_CURVE[0]!;
 const last = DAMAGE_FALLOFF_CURVE[DAMAGE_FALLOFF_CURVE.length - 1]!;
 
 describe('the declared damage falloff curve', () => {
-  it('is a table of at least two breakpoints', () => {
+  it('is ordered by distance, strictly decreasing, and everywhere positive', () => {
     expect(DAMAGE_FALLOFF_CURVE.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('is ordered by increasing distance and strictly decreasing damage', () => {
     for (let i = 1; i < DAMAGE_FALLOFF_CURVE.length; i += 1) {
       const previous = DAMAGE_FALLOFF_CURVE[i - 1]!;
       const current = DAMAGE_FALLOFF_CURVE[i]!;
       expect(current.distanceCells).toBeGreaterThan(previous.distanceCells);
       expect(current.damage).toBeLessThan(previous.damage);
+      expect(current.damage).toBeGreaterThan(0);
     }
+    expect(first.damage).toBeGreaterThan(0);
   });
 
-  it('deals positive damage at every declared breakpoint', () => {
-    for (const point of DAMAGE_FALLOFF_CURVE) {
-      expect(point.damage).toBeGreaterThan(0);
-    }
-  });
-
-  it('names its minimum and maximum range from the table, not from a literal', () => {
+  it('names its range and its damages from the table, not from a literal', () => {
     expect(FALLOFF_MIN_RANGE_CELLS).toBe(first.distanceCells);
     expect(FALLOFF_MAX_RANGE_CELLS).toBe(last.distanceCells);
     expect(FALLOFF_MAX_DAMAGE).toBe(first.damage);
     expect(FALLOFF_MIN_DAMAGE).toBe(last.damage);
+  });
+
+  // The curve must cover the range a guard may actually shoot at, or every real
+  // shot would be evaluated on a clamped tail.
+  it('covers the range a guard attacks from', () => {
+    expect(ATTACK_RANGE_CELLS).toBeGreaterThanOrEqual(FALLOFF_MIN_RANGE_CELLS);
+    expect(ATTACK_RANGE_CELLS).toBeLessThanOrEqual(FALLOFF_MAX_RANGE_CELLS);
   });
 });
 
@@ -55,7 +54,7 @@ describe('damageAtDistance', () => {
     }
   });
 
-  // US3-S2, stated as the spec states it: near beats far, and both are lethal.
+  // US3-S2, as the spec states it: near beats far, and both are lethal.
   it('deals strictly more at the near breakpoint than at the far one, both above zero', () => {
     const near = damageAtDistance(FALLOFF_MIN_RANGE_CELLS);
     const far = damageAtDistance(FALLOFF_MAX_RANGE_CELLS);
@@ -82,22 +81,12 @@ describe('damageAtDistance', () => {
     }
   });
 
-  it('clamps below the minimum range and beyond the maximum range', () => {
+  it('clamps both ends and answers a non-finite distance rather than NaN', () => {
     expect(damageAtDistance(0)).toBe(FALLOFF_MAX_DAMAGE);
     expect(damageAtDistance(-5)).toBe(FALLOFF_MAX_DAMAGE);
     expect(damageAtDistance(FALLOFF_MAX_RANGE_CELLS * 10)).toBe(FALLOFF_MIN_DAMAGE);
-  });
-
-  it('answers a non-finite distance with the far end rather than NaN', () => {
     expect(damageAtDistance(Number.NaN)).toBe(FALLOFF_MIN_DAMAGE);
     expect(damageAtDistance(Infinity)).toBe(FALLOFF_MIN_DAMAGE);
-  });
-
-  // The curve has to cover the range a guard may actually shoot at, or every
-  // real shot would be evaluated on a clamped tail.
-  it('covers the range a guard attacks from', () => {
-    expect(ATTACK_RANGE_CELLS).toBeGreaterThanOrEqual(FALLOFF_MIN_RANGE_CELLS);
-    expect(ATTACK_RANGE_CELLS).toBeLessThanOrEqual(FALLOFF_MAX_RANGE_CELLS);
   });
 
   it('is pure: no three.js, no DOM (FR-001)', () => {

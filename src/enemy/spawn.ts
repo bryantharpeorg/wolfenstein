@@ -1,19 +1,14 @@
 // Reading the level's guard markers into guard records (FR-006). Pure: no DOM,
 // no three.js (FR-001).
 //
-// The spec asks for three things of this file, and the third is the interesting
-// one. One guard per marker, so the live count is the marker count. That count
-// asserted between `MIN_GUARDS` and `MAX_GUARDS`. And a marker that lands on a
-// wall cell *named*, with its coordinates, rather than silently dropped or
-// thrown out of startup (US3-S7).
-//
-// Neither fault is raised as an exception, and neither drops a guard. A throw
-// during `setup` takes the whole page down through 001's error handlers, which
-// tells a reader "something crashed" when the truth is "the level's marker table
-// disagrees with its grid" — so the faults are returned as strings, published
-// through `__diag.enemySpawnErrors`, and it is `tools/smoke-checks/enemies.mjs`
-// that fails the gate on them. The consequence is identical and the message is
-// the marker's coordinates instead of a stack trace.
+// One guard per marker, so the live count is the marker count; that count
+// asserted between `MIN_GUARDS` and `MAX_GUARDS`; and a marker landing on a wall
+// cell *named*, with its coordinates, rather than dropped or thrown (US3-S7).
+// Neither fault throws and neither drops a guard: a throw during `setup` would
+// tell a reader "something crashed" when the truth is "the marker table
+// disagrees with the grid", so faults are returned as strings, published through
+// `__diag.enemySpawnErrors`, and it is `tools/smoke-checks/enemies.mjs` that
+// fails the gate on them.
 
 import { ENEMY_SPAWNS, LEVEL_GRID } from '../level';
 import type { TileCoord } from '../level';
@@ -30,14 +25,13 @@ export const MAX_GUARDS = 10;
 /** The seed the spawn facings are drawn from, so a run is reproducible. */
 export const GUARD_SPAWN_SEED = 0x6e656d79;
 
-/** Markers are read against the closed level: a guard is placed before any door
- *  has been opened, so a marker in a doorway is a fault whatever 004 does later. */
+/** Markers are checked against the closed level: a guard is placed before any
+ *  door opens, so a marker in a doorway is a fault whatever 004 does later. */
 const CLOSED: OpenState = new Set<string>();
 
 export interface SpawnOptions {
-  /** The grid to check markers against. Defaults to 002's level. */
+  /** Defaults to 002's level grid and marker table. */
   readonly grid?: string[];
-  /** The marker table. Defaults to 002's `ENEMY_SPAWNS`. */
   readonly markers?: readonly TileCoord[];
   readonly seed?: number;
 }
@@ -50,17 +44,14 @@ export interface SpawnResult {
   readonly markerCount: number;
 }
 
-/** The id of the guard spawned from marker `index`. Stable across runs, and the
- *  key the `Navigator`'s per-guard throttle and claims are held under. */
+/** The id of the guard spawned from marker `index` — stable across runs, and the
+ *  key the navigation throttle and claims are held under. */
 export function guardIdFor(index: number): string {
   return `guard-${index}`;
 }
 
-/**
- * Builds one guard per marker. Facings are drawn from a seeded generator rather
- * than left at zero, so eight guards do not all stare down -Z at startup, and
- * are reproducible for the same reason every other draw in this spec is.
- */
+/** One guard per marker. Facings are drawn from a seeded generator rather than
+ *  left at zero, so the guards do not all stare down -Z at startup. */
 export function spawnGuards(options: SpawnOptions = {}): SpawnResult {
   const grid = options.grid ?? LEVEL_GRID;
   const markers = options.markers ?? ENEMY_SPAWNS;
@@ -77,14 +68,7 @@ export function spawnGuards(options: SpawnOptions = {}): SpawnResult {
         `enemy spawn marker ${index} at (${marker.x}, ${marker.z}) lies on a wall cell '${cell}'`,
       );
     }
-    guards.push(
-      createGuard({
-        id: guardIdFor(index),
-        x: marker.x + 0.5,
-        z: marker.z + 0.5,
-        facing,
-      }),
-    );
+    guards.push(createGuard({ id: guardIdFor(index), x: marker.x + 0.5, z: marker.z + 0.5, facing }));
   });
 
   if (guards.length < MIN_GUARDS) {

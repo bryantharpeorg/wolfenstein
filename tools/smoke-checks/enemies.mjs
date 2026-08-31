@@ -1,16 +1,12 @@
 // The enemies smoke check (T027, FR-006, FR-011, SC-004): six to ten guards are
-// alive in the built page, the count matches the level's own marker table, and no
-// spawn marker landed on a wall.
+// alive in the built page, the count matches the level's own marker table, and
+// no spawn marker landed on a wall.
 //
-// The marker count is re-read out of `src/level.ts` here rather than taken from
-// the page, so this check proves the page agrees with the level file instead of
-// agreeing with itself — the same trick `tools/smoke.mjs` uses for the tile
-// counts.
-//
-// `enemySpawnErrors` is why this file exists at all. A marker on a wall cell is a
-// *named* fault with coordinates, not a thrown exception, so it would never reach
-// `__diag.errors`; failing the gate on it here is what gives FR-006's requirement
-// teeth without borrowing 001's array.
+// The marker count is re-read out of `src/level.ts` rather than taken from the
+// page, so this proves the page agrees with the level file instead of with
+// itself. `enemySpawnErrors` is why the file exists at all: a marker on a wall
+// is a *named* fault with coordinates, not a thrown exception, so it would never
+// reach `__diag.errors` -- failing the gate here is what gives FR-006 teeth.
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -45,7 +41,8 @@ export default async function check({ page, root }) {
     return errors;
   }
 
-  // FR-006: at least six guards, at most ten, and every one of them alive at spawn.
+  // FR-006: six to ten guards, every one of them alive at spawn, and as many as
+  // the level file declares markers.
   if (diag.enemies.length < MIN_GUARDS || diag.enemies.length > MAX_GUARDS) {
     errors.push(
       `__diag.enemies.length is ${diag.enemies.length}, outside the required ${MIN_GUARDS}..${MAX_GUARDS}`,
@@ -74,16 +71,14 @@ export default async function check({ page, root }) {
     errors.push(`__diag.enemySpawnErrors is non-empty: ${diag.enemySpawnErrors.join('; ')}`);
   }
 
-  // FR-011's per-guard shape, asserted field by field so US4 finds it already there.
+  // FR-011's per-guard shape, so US4 finds it already there.
   diag.enemies.forEach((entry, index) => {
-    if (typeof entry?.state !== 'string') {
-      errors.push(`__diag.enemies[${index}].state is not a string: ${JSON.stringify(entry?.state)}`);
-    }
-    if (!Number.isFinite(entry?.viewAngle)) {
-      errors.push(`__diag.enemies[${index}].viewAngle is not a number: ${JSON.stringify(entry?.viewAngle)}`);
-    }
-    if (typeof entry?.pathable !== 'boolean') {
-      errors.push(`__diag.enemies[${index}].pathable is not a boolean: ${JSON.stringify(entry?.pathable)}`);
+    const shape =
+      typeof entry?.state === 'string' &&
+      Number.isFinite(entry?.viewAngle) &&
+      typeof entry?.pathable === 'boolean';
+    if (!shape) {
+      errors.push(`__diag.enemies[${index}] is not {state, viewAngle, pathable}: ${JSON.stringify(entry)}`);
     }
   });
 

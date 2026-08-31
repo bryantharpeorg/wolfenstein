@@ -1,17 +1,14 @@
 // The smoke-check loop (T027). A story that needs a runtime assertion adds
 // `tools/smoke-checks/<name>.mjs` and edits nothing else -- the same trick
-// `src/boot/discover.ts` plays on `src/main.ts`, for the same reason: two stories
-// appending to one harness file conflict on adjacent lines.
+// `src/boot/discover.ts` plays on `src/main.ts`, and for the same reason.
 //
-// It lives here rather than inside `tools/smoke.mjs` because that file is already
-// past the 400-line ceiling (Article IV) and this story is not the one that gets
-// to split it; adding a self-contained module leaves the shared harness eight
-// lines longer instead of seventy.
+// It lives here rather than inside `tools/smoke.mjs` because that harness is
+// already past the 400-line ceiling (Article IV) and this story is not the one
+// that splits it.
 //
 // A check module default-exports `async ({ page, url, root }) => string[]`, an
-// empty array meaning it passed. Each one gets its own browser context and its
-// own freshly loaded page, so a check that drives the camera or the player cannot
-// leave the next one reading a moved world.
+// empty array meaning it passed. Each gets its own context and freshly loaded
+// page, so a check that drives the world cannot leave the next one reading it.
 
 import { existsSync, readdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -19,8 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const CHECKS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'smoke-checks');
 
-/** Every check module, in a stable order — discovery must not depend on the
- *  filesystem's iteration order any more than system registration does. */
+/** Every check module, in a stable order. */
 export function discoverSmokeChecks() {
   if (!existsSync(CHECKS_DIR)) return [];
   return readdirSync(CHECKS_DIR)

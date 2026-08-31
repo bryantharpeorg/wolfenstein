@@ -1,18 +1,11 @@
-// `hasLineOfSight`: can a guard standing at `a` see the point `b`? A cell-stepping
-// DDA over the level grid, honouring 004's open-tile state (FR-005, US2-S5..S8).
+// `hasLineOfSight`: can a guard at `a` see the point `b`? A cell-stepping DDA
+// over the level grid, honouring 004's open-tile state (FR-005, US2-S5..S8).
 // Pure: no DOM, no three.js (FR-001).
 //
-// Two properties are load-bearing and are asserted rather than assumed.
-//
-// *It allocates nothing.* No array, no object, no closure is created per call —
-// only numbers on the stack. Ten guards asking every frame must cost no garbage
-// (US2-S8), so the traversal carries its state in locals and the blocking test is
-// 003's `isTileBlocking`, which takes coordinates rather than a cell object.
-//
-// *It is bounded.* The walk gives up after `MAX_LOS_STEPS` cells and answers
-// `false`. A segment that long cannot occur on a 64x64 grid, so the bound is
-// unreachable in play and absolute in principle: no map can make sight hang a
-// frame.
+// Two properties are load-bearing and are asserted rather than assumed. It
+// *allocates nothing* — only numbers on the stack, so ten guards asking every
+// frame cost no garbage (US2-S8). And it is *bounded*: the walk gives up after
+// `MAX_LOS_STEPS` cells, so no map can make sight hang a frame.
 
 import { isTileBlocking } from '../player/tiles';
 import type { OpenState } from '../player/tiles';
@@ -21,20 +14,31 @@ import type { Point } from './guard';
 /** The declared step cap. 64x64 spans at most ~128 cells, so this is slack. */
 export const MAX_LOS_STEPS = 512;
 
-/** How close two boundary crossings must be to count as the same corner. The
- *  units are fractions of the whole segment, so this is far below any real gap
- *  and far above the rounding error of a 45-degree ray between two cell centres. */
+/** How close two boundary crossings must be to count as the same corner, as a
+ *  fraction of the whole segment: far below any real gap, far above rounding. */
 export const LOS_CORNER_EPSILON = 1e-9;
+
+/** Where the last refused walk died: the cell that stopped it and how far along
+ *  the segment that was, as a fraction of its length. Module scope so the walk
+ *  still allocates nothing per call (US2-S8); `./attack` reads it immediately
+ *  after the call that wrote it, to report a shot's termination distance. */
+export const lastBlock = { x: 0, z: 0, fraction: 0 };
+
+function blockedAt(x: number, z: number, fraction: number): false {
+  lastBlock.x = x;
+  lastBlock.z = z;
+  lastBlock.fraction = fraction;
+  return false;
+}
 
 /**
  * Whether `b` is visible from `a` through `grid`, given the tiles `doorStates`
  * marks open. Endpoints are exempt: a guard standing in a doorway can see out of
- * it, and a player standing in one can be seen.
- *
- * The two refusals the spec names explicitly:
- *  - any wall, or any door not in `doorStates`, strictly between them (US2-S6);
- *  - a diagonal corner whose two orthogonal neighbours both block, which is the
- *    pinwheel a guard must not shoot through (US2-S7).
+ * it, and a player standing in one can be seen. Two refusals the spec names: any
+ * wall or closed door strictly between them (US2-S6), and a diagonal corner
+ * whose two orthogonal neighbours both block (US2-S7). A refusal leaves the cell
+ * that stopped it in `lastBlock`, which is the whole of what `./attack` needs a
+ * ray for beyond this answer.
  */
 export function hasLineOfSight(
   grid: string[],
@@ -53,8 +57,8 @@ export function hasLineOfSight(
   const stepX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
   const stepZ = dz > 0 ? 1 : dz < 0 ? -1 : 0;
 
-  // Segment fractions: `deltaX` is how much of the segment one whole cell of X
-  // costs, `nextX` how much of it is left before the next X boundary.
+  // Segment fractions: `deltaX` is what one whole cell of X costs, `nextX` how
+  // much of the segment is left before the next X boundary.
   const deltaX = stepX === 0 ? Infinity : Math.abs(1 / dx);
   const deltaZ = stepZ === 0 ? Infinity : Math.abs(1 / dz);
   let nextX = stepX === 0 ? Infinity : (stepX > 0 ? x + 1 - a.x : a.x - x) * deltaX;
@@ -62,21 +66,24 @@ export function hasLineOfSight(
 
   for (let steps = 0; steps < MAX_LOS_STEPS; steps += 1) {
     const lead = nextX - nextZ;
+    let travelled: number;
     if (lead < -LOS_CORNER_EPSILON) {
+      travelled = nextX;
       x += stepX;
       nextX += deltaX;
     } else if (lead > LOS_CORNER_EPSILON) {
+      travelled = nextZ;
       z += stepZ;
       nextZ += deltaZ;
     } else {
-      // The ray crosses both boundaries at once — it is threading a corner. It
-      // may only pass if at least one of the two cells flanking that corner is
-      // open; two walls close it (US2-S7).
+      // Threading a corner: it may be passed only if one of the two flanking
+      // cells is open; two walls close it (US2-S7).
+      travelled = nextX;
       if (
         isTileBlocking(grid, x + stepX, z, doorStates) &&
         isTileBlocking(grid, x, z + stepZ, doorStates)
       ) {
-        return false;
+        return blockedAt(x + stepX, z + stepZ, nextX);
       }
       x += stepX;
       z += stepZ;
@@ -84,8 +91,8 @@ export function hasLineOfSight(
       nextZ += deltaZ;
     }
     if (x === goalX && z === goalZ) return true;
-    if (isTileBlocking(grid, x, z, doorStates)) return false;
+    if (isTileBlocking(grid, x, z, doorStates)) return blockedAt(x, z, travelled);
   }
   // Past the cap: refused rather than pursued, so the walk is O(1)-bounded.
-  return false;
+  return blockedAt(x, z, 1);
 }
