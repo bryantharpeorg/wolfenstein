@@ -12,8 +12,11 @@
 import type { Diagnostics } from '../diag/diag';
 import type { MaterialName } from './table';
 
-/** Which of a material's two derived maps could not be produced (FR-007). */
-export type MaterialMapKind = 'normal' | 'roughness';
+/** Which of a material's two derived maps could not be produced (FR-007), or
+ * `binding` where US3 substituted 002's declared default for a wall type ID the
+ * material table has no entry for (FR-008). One list, because both are the same
+ * kind of event: a declared degradation taken rather than a failure thrown. */
+export type MaterialMapKind = 'normal' | 'roughness' | 'binding';
 
 export interface MaterialFallback {
   readonly name: MaterialName;
