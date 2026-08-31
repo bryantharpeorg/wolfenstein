@@ -44,14 +44,32 @@ describe('normalizeAngle', () => {
 });
 
 describe('bearingBetween', () => {
-  // Bearing 0 is due north (-Z, the yaw a guard with facing 0 looks along) and
-  // grows clockwise through east, matching the yaw convention `guard.ts` fixes.
-  it('reads due north as zero and turns clockwise through east', () => {
+  // Bearing 0 is due north (-Z, the yaw a guard with facing 0 looks along) and a
+  // bearing `b` names the direction `(-sin b, -cos b)` — the convention
+  // `step.ts`'s `yawToward` and `camera.rotation.y` already use, so a bearing and
+  // a guard's facing can be subtracted from one another at all.
+  it('agrees with the yaw convention: north is zero, and yaw turns toward west', () => {
     const guard = { x: 5, z: 5 };
     expect(bearingBetween(guard, { x: 5, z: 3 })).toBeCloseTo(0, 12);
-    expect(bearingBetween(guard, { x: 7, z: 5 })).toBeCloseTo(Math.PI / 2, 12);
+    expect(bearingBetween(guard, { x: 3, z: 5 })).toBeCloseTo(Math.PI / 2, 12);
     expect(bearingBetween(guard, { x: 5, z: 7 })).toBeCloseTo(Math.PI, 12);
-    expect(bearingBetween(guard, { x: 3, z: 5 })).toBeCloseTo((3 * Math.PI) / 2, 12);
+    expect(bearingBetween(guard, { x: 7, z: 5 })).toBeCloseTo((3 * Math.PI) / 2, 12);
+  });
+
+  // The property the convention exists for: a guard that has turned to face a
+  // point sees that point at relative bearing 0, and so shows its front column.
+  it('puts a guard that faces a point at column 0 from that point', () => {
+    const guard = { x: 12, z: 20 };
+    for (const camera of [
+      { x: 12, z: 14 },
+      { x: 17, z: 20 },
+      { x: 8, z: 25 },
+      { x: 12.5, z: 20.5 },
+    ]) {
+      // `yawToward` in `step.ts` is `atan2(-dx, -dz)`: the same function.
+      const facing = Math.atan2(-(camera.x - guard.x), -(camera.z - guard.z));
+      expect(viewAngleIndex(facing, bearingBetween(guard, camera))).toBe(0);
+    }
   });
 
   it('is independent of distance', () => {

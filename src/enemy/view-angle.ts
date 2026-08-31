@@ -3,10 +3,16 @@
 // eight distinct columns" is a `npm run test` fact rather than a thing to be
 // judged by eye.
 //
-// One convention, fixed here and nowhere else: a bearing of 0 is due north —
-// the -Z direction, which is the yaw a guard with `facing === 0` looks along
-// (see `guard.ts`) — and bearings grow clockwise through east (+X). The sprite
-// sheet's first column is therefore the guard's *front*: the viewer standing due
+// One convention, and it is the codebase's own rather than a new one. A bearing
+// of 0 is due north — the -Z direction, which is the yaw a guard with
+// `facing === 0` looks along (`guard.ts`) — and a bearing `b` names the
+// direction `(-sin b, -cos b)`, exactly as `step.ts`'s `yawToward` and the
+// camera's `rotation.y` do. Sharing the convention is load-bearing: a bearing
+// measured the other way round would put the guard's *back* on the screen at the
+// moment it turned to face the player, and every column would be wrong by a
+// reflection while still passing a distinctness test.
+//
+// The sheet's first column is therefore the guard's front: a viewer standing due
 // north of a north-facing guard sees it face on, which is US4-S3's index 0.
 
 /** Columns on the sheet, one per 45 degrees of relative bearing (FR-009). */
@@ -30,17 +36,18 @@ export function normalizeAngle(radians: number): number {
 }
 
 /**
- * The bearing from `from` to `to`: 0 due north, growing clockwise through east.
- * Two coincident points answer 0 rather than a NaN, so a camera standing exactly
- * on a guard still picks a column instead of blanking the sprite.
+ * The bearing from `from` to `to`, in the yaw convention above: 0 due north,
+ * turning toward west. Two coincident points answer 0 rather than a NaN, so a
+ * camera standing exactly on a guard still picks a column instead of blanking
+ * the sprite.
  */
 export function bearingBetween(from: Bearing2D, to: Bearing2D): number {
   const dx = to.x - from.x;
   const dz = to.z - from.z;
   if (dx === 0 && dz === 0) return 0;
-  // atan2(dx, -dz): +X is a quarter turn clockwise from -Z, which is the
-  // clockwise-from-north convention above.
-  return normalizeAngle(Math.atan2(dx, -dz));
+  // The inverse of `(-sin b, -cos b)`, which is what makes a bearing directly
+  // comparable with a guard's `facing` and with `camera.rotation.y`.
+  return normalizeAngle(Math.atan2(-dx, -dz));
 }
 
 /**

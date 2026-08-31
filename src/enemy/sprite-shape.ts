@@ -149,16 +149,26 @@ const GROUND_Y = 0.93;
 const CENTRE_X = 0.5;
 
 interface Turn {
-  /** +1 when the viewer stands to the guard's right, -1 to its left. */
+  /** The sideways component of the relative bearing: +1 with the viewer abeam
+   *  the guard on one side, -1 on the other. */
   readonly side: number;
   /** +1 when the viewer sees the guard's front, -1 its back. */
   readonly front: number;
+  /** Which way the guard's nose points across the *image*, from the viewer's
+   *  own left (-1) to its right (+1). A guard seen face on has its nose toward
+   *  the viewer and this is 0; abeam, it is the profile's direction. */
+  readonly nose: number;
 }
 
 /** The two projections of one view angle. Column 0 is the front (`view-angle.ts`). */
 function turnFor(angle: number, angles: number): Turn {
   const radians = angle * ((Math.PI * 2) / angles);
-  return { side: Math.sin(radians), front: Math.cos(radians) };
+  const side = Math.sin(radians);
+  // Derived once, here: with `view-angle.ts`'s convention a viewer at relative
+  // bearing `b` sees the guard's front projected onto its own right as `-sin b`.
+  // Getting this sign wrong reflects every profile, which no test of column
+  // *distinctness* would ever catch.
+  return { side, front: Math.cos(radians), nose: -side };
 }
 
 /** A standing guard at one bearing, one step of the walk cycle. */
@@ -186,9 +196,9 @@ function walkCell(cell: number, turn: Turn, phase: number, jitter: () => number)
     draw.rect(trim, x - 0.05, GROUND_Y - 0.06, 0.1, 0.06);
   }
 
-  // Torso: a trapezoid, shoulders wider than hips, leaning very slightly with
-  // the bearing so a side view is not a mirror of the front.
-  const lean = 0.02 * turn.side;
+  // Torso: a trapezoid, shoulders wider than hips, leaning very slightly the way
+  // the guard is looking so a side view is not a mirror of the front.
+  const lean = 0.02 * turn.nose;
   draw.polygon(uniform, [
     { x: CENTRE_X - halfWidth - 0.03 + lean, y: shoulderY },
     { x: CENTRE_X + halfWidth + 0.03 + lean, y: shoulderY },
@@ -198,20 +208,23 @@ function walkCell(cell: number, turn: Turn, phase: number, jitter: () => number)
   draw.rect(trim, CENTRE_X - halfWidth, hipY - 0.05, halfWidth * 2, 0.05);
 
   // Head: skin face on, a cap covering it from behind.
-  const headX = CENTRE_X + 0.02 * turn.side + jitter();
+  const headX = CENTRE_X + 0.02 * turn.nose + jitter();
   draw.ellipse(hex(SKIN, shade * 0.5), headX, headY, 0.095, 0.105);
   draw.rect(trim, headX - 0.095, headY - 0.105, 0.19, 0.075 - 0.03 * turn.front);
   if (turn.front > 0.3) {
     for (const eye of [-1, 1]) draw.rect(hex(TRIM), headX + eye * 0.04 - 0.012, headY + 0.01, 0.024, 0.018);
   } else if (turn.front > -0.3) {
-    draw.rect(hex(TRIM), headX + turn.side * 0.045 - 0.012, headY + 0.01, 0.024, 0.018);
+    // A profile: one eye, on the side the nose points.
+    draw.rect(hex(TRIM), headX + turn.nose * 0.045 - 0.012, headY + 0.01, 0.024, 0.018);
   }
 
-  // The weapon, held on the guard's right: foreshortened to a stub face on and
-  // at full length from the side, which is the other half of the bearing cue.
+  // The weapon, held in the guard's right hand: that hand is across the image at
+  // `-front`, and the barrel lies along the guard's nose, so it foreshortens to a
+  // stub face on and reaches its full length abeam -- the other half of the
+  // bearing cue after the silhouette.
   const barrel = 0.06 + 0.16 * Math.abs(turn.side);
-  const armX = CENTRE_X + turn.side * (halfWidth + 0.02);
-  draw.rect(hex(WEAPON), Math.min(armX, armX + turn.side * barrel), 0.5 - bob, barrel, 0.045);
+  const armX = CENTRE_X - turn.front * (halfWidth + 0.02);
+  draw.rect(hex(WEAPON), turn.nose >= 0 ? armX : armX - barrel, 0.5 - bob, barrel, 0.045);
   draw.rect(hex(SKIN, shade * 0.5), armX - 0.03, 0.47 - bob, 0.06, 0.06);
 
   return draw.ops;
@@ -224,7 +237,9 @@ function deathCell(cell: number, turn: Turn, progress: number, jitter: () => num
   const shade = 0.12 * turn.front;
   const uniform = hex(UNIFORM, shade - 0.15 * progress);
   const trim = hex(TRIM, shade);
-  const fall = turn.side >= 0 ? 1 : -1;
+  // A body falls the way it was turned, so the heap is not the same picture at
+  // every bearing.
+  const fall = turn.nose >= 0 ? 1 : -1;
 
   draw.ellipse(hex(SHADOW), CENTRE_X, GROUND_Y + 0.02, 0.16 + 0.08 * progress, 0.035);
   if (progress > 0.5) draw.ellipse(hex(BLOOD), CENTRE_X + fall * 0.1, GROUND_Y - 0.01, 0.09 * progress, 0.03);
