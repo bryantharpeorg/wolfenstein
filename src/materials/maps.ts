@@ -1,16 +1,10 @@
-// One material's complete map set: `{albedo, normal, roughness, height}`, all
-// three maps at the declared size and on one grid, so a single UV addresses all
-// of them with no sampling offset (FR-005, FR-006, US2-S6).
-//
-// The degradation FR-007 declares lives here too. A normal or roughness
-// derivation that cannot be completed does not stall the build and does not
-// leave a surface bare: that material ships with a flat normal or the declared
-// constant roughness, still carries its albedo, and the fact is recorded once
-// in `__diag.materials.fallbacks` and once in `DECISIONS.md` (US2-S7).
-//
-// Pure: no three.js, no DOM. `texture-adapter.ts` is US3's, and is the one
-// place a buffer meets a renderer.
-
+// One material's complete map set — `{albedo, normal, roughness, height}`, all
+// three maps at the declared size on one grid, so one UV addresses all of them
+// with no sampling offset (FR-005, FR-006, US2-S6) — and FR-007's degradation:
+// a derivation that cannot be completed ships a flat normal or the declared
+// constant roughness, still carries its albedo, and is recorded in
+// `__diag.materials.fallbacks` and in `DECISIONS.md`. Pure; US3's
+// `texture-adapter.ts` is where a buffer meets a renderer.
 import { RGBA_CHANNELS, TEXTURE_SIZE } from './constants';
 import {
   beginMaterialBuild,
@@ -26,9 +20,8 @@ import { FALLBACK_ROUGHNESS, constantRoughnessMap, deriveRoughnessMap } from './
 import { MATERIAL_NAMES, MATERIAL_TABLE } from './table';
 import type { MaterialName, RoughnessRange } from './table';
 
-/** Albedo, normal and roughness — the three maps whose bytes US2-S8 counts.
- * The height field is not among them: it is the input the other two are derived
- * from and it never reaches the GPU. */
+/** Albedo, normal and roughness — the three maps US2-S8 counts bytes for. The
+ * height field is their input and never reaches the GPU. */
 export const MAPS_PER_MATERIAL = 3;
 
 export interface MaterialMaps {
@@ -37,8 +30,7 @@ export interface MaterialMaps {
   readonly albedo: Uint8ClampedArray;
   readonly normal: Uint8ClampedArray;
   readonly roughness: Uint8ClampedArray;
-  /** The field the other two were derived from, kept for assertions; it is not
-   * uploaded and is not counted in `bytes`. */
+  /** Kept for assertions; not uploaded and not counted in `bytes`. */
   readonly height: Float32Array;
   /** False when the flat-normal fallback was taken (FR-007). */
   readonly hasNormal: boolean;
@@ -46,11 +38,8 @@ export interface MaterialMaps {
   readonly hasRoughness: boolean;
 }
 
-/**
- * The two derivations, injectable. In production these are the real ones; a
- * test substitutes a throwing derivation to exercise FR-007's degradation
- * without having to corrupt a height field into failing.
- */
+/** The two derivations, injectable: a test substitutes a throwing one to
+ * exercise FR-007 rather than corrupting a height field into failing. */
 export interface MapDerivations {
   normal(height: Float32Array, size: number): Uint8ClampedArray;
   roughness(height: Float32Array, size: number, range: RoughnessRange): Uint8ClampedArray;
@@ -62,34 +51,27 @@ export const DEFAULT_DERIVATIONS: MapDerivations = {
 };
 
 /** Texture memory for `mapCount` RGBA maps at one edge length (US2-S8). */
-export function mapBytes(size: number, mapCount: number): number {
-  return size * size * RGBA_CHANNELS * mapCount;
-}
+export const mapBytes = (size: number, mapCount: number): number =>
+  size * size * RGBA_CHANNELS * mapCount;
 
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+const reasonOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/**
- * One material's three maps. The normal and the roughness are derived from that
- * material's own height field — never from the luminance of its albedo (FR-005)
- * — and every buffer returned is `size * size` RGBA texels on the same grid.
- */
+/** One material's three maps, derived from that material's own height field and
+ * never from the luminance of its albedo (FR-005). */
 export function buildMaterialMaps(
   name: MaterialName,
   size: number = TEXTURE_SIZE,
   derivations: MapDerivations = DEFAULT_DERIVATIONS,
 ): MaterialMaps {
   const generated = generateAlbedo(name, size);
-  const range = MATERIAL_TABLE[name].roughness;
 
   let normal: Uint8ClampedArray;
   let hasNormal = true;
   try {
     normal = derivations.normal(generated.height, size);
   } catch (error) {
-    // A flat normal lights as if the surface were flat, which is a visible
-    // degradation. A missing map would be a black wall, which is not allowed.
+    // A flat normal lights as if the surface were flat, a visible degradation.
+    // A missing map would be a bare wall, which is never allowed.
     normal = flatNormalMap(size);
     hasNormal = false;
     recordFallback({ material: name, map: 'normal', reason: reasonOf(error) });
@@ -98,7 +80,7 @@ export function buildMaterialMaps(
   let roughness: Uint8ClampedArray;
   let hasRoughness = true;
   try {
-    roughness = derivations.roughness(generated.height, size, range);
+    roughness = derivations.roughness(generated.height, size, MATERIAL_TABLE[name].roughness);
   } catch (error) {
     roughness = constantRoughnessMap(size, FALLBACK_ROUGHNESS);
     hasRoughness = false;
@@ -106,12 +88,10 @@ export function buildMaterialMaps(
   }
 
   recordMaterialMaps({ name, hasNormal, hasRoughness });
-
   return {
     name,
     size,
-    // The albedo is never conditional: whatever else degraded, the surface is
-    // textured (FR-007).
+    // Never conditional: whatever degraded, the surface is textured (FR-007).
     albedo: generated.albedo,
     normal,
     roughness,
@@ -128,23 +108,16 @@ export interface MaterialMapSet {
   readonly diagnostics: MaterialDiagnostics;
 }
 
-/**
- * Every declared material's map set, plus the numbers US2-S8 wants reported:
- * what generation cost, how many maps exist, and how many bytes they are. A
- * resolution change moves `bytes` by a factor of four, which is a number in
- * diagnostics rather than a stutter someone has to notice.
- */
+/** Every declared material's map set, plus what US2-S8 wants reported: what
+ * generation cost, how many maps exist, and how many bytes they are. */
 export function buildAllMaterialMaps(
   size: number = TEXTURE_SIZE,
   derivations: MapDerivations = DEFAULT_DERIVATIONS,
 ): MaterialMapSet {
   beginMaterialBuild();
-
   const maps = {} as Record<MaterialName, MaterialMaps>;
   for (const name of MATERIAL_NAMES) maps[name] = buildMaterialMaps(name, size, derivations);
-
   const textureCount = MATERIAL_NAMES.length * MAPS_PER_MATERIAL;
   recordMapSetCost(generationStats().generatedMs, textureCount, mapBytes(size, textureCount));
-
   return { size, maps, diagnostics: materialDiagnostics() };
 }
