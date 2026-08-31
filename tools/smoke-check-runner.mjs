@@ -1,10 +1,8 @@
 // The smoke-check loop (T027). A story that needs a runtime assertion adds
 // `tools/smoke-checks/<name>.mjs` and edits nothing else -- the same trick
-// `src/boot/discover.ts` plays on `src/main.ts`, and for the same reason.
-//
-// It lives here rather than inside `tools/smoke.mjs` because that harness is
-// already past the 400-line ceiling (Article IV) and this story is not the one
-// that splits it.
+// `src/boot/discover.ts` plays on `src/main.ts`. It lives here rather than in
+// `tools/smoke.mjs` because that harness is already past the 400-line ceiling
+// and this story is not the one that splits it.
 //
 // A check module default-exports `async ({ page, url, root }) => string[]`, an
 // empty array meaning it passed. Each gets its own context and freshly loaded

@@ -1,12 +1,9 @@
-// The enemies smoke check (T027, FR-006, FR-011, SC-004): six to ten guards are
-// alive in the built page, the count matches the level's own marker table, and
-// no spawn marker landed on a wall.
-//
-// The marker count is re-read out of `src/level.ts` rather than taken from the
-// page, so this proves the page agrees with the level file instead of with
-// itself. `enemySpawnErrors` is why the file exists at all: a marker on a wall
-// is a *named* fault with coordinates, not a thrown exception, so it would never
-// reach `__diag.errors` -- failing the gate here is what gives FR-006 teeth.
+// The enemies smoke check (T027, FR-006, FR-011, SC-004): six to ten guards
+// alive in the built page, as many as the level's own marker table declares, and
+// no spawn marker on a wall. The marker count is re-read out of `src/level.ts`
+// rather than taken from the page, so this proves the page agrees with the level
+// file instead of with itself; and `enemySpawnErrors` never reaches
+// `__diag.errors`, so failing the gate here is what gives FR-006 teeth.
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
