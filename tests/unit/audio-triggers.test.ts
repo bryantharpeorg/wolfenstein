@@ -9,6 +9,7 @@ import { BOB_FREQUENCY, WALK_SPEED } from '../../src/player/params';
 import { gunfireSoundFor } from '../../src/audio/sound-table';
 import {
   FOOTSTEP_STRIDE_UNITS,
+  gunfireForResolvedShots,
   MAX_FOOTSTEPS_PER_STEP,
   createFootstepCadence,
   soundForDoorTransition,
@@ -44,6 +45,27 @@ describe('the resolved shot', () => {
       .replace(/\/\*[\s\S]*?\*\//g, ' ')
       .replace(/^\s*\/\/.*$/gm, ' ');
     expect(source).not.toMatch(/\b(keydown|keyup|KeyboardEvent|ControlLeft|Digit1|held)\b/);
+  });
+});
+
+describe('the frame of resolved shots', () => {
+  it('names one gunfire per shot the gate resolved', () => {
+    expect(gunfireForResolvedShots('smg', 3, 8)).toEqual([
+      'gunfire-smg', 'gunfire-smg', 'gunfire-smg',
+    ]);
+  });
+
+  it('is silent for a frame that resolved no shot — the refused frame (US3-S4)', () => {
+    for (const weapon of WEAPON_KINDS) {
+      expect(gunfireForResolvedShots(weapon, 0, 8)).toEqual([]);
+      expect(gunfireForResolvedShots(weapon, -2, 8)).toEqual([]);
+      expect(gunfireForResolvedShots(weapon, Number.NaN, 8)).toEqual([]);
+    }
+  });
+
+  it('never names more than the caller allows', () => {
+    expect(gunfireForResolvedShots('chaingun', 40, 4)).toHaveLength(4);
+    expect(gunfireForResolvedShots('chaingun', 40, 0)).toEqual([]);
   });
 });
 

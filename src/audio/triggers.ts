@@ -30,6 +30,24 @@ export function soundForShot(shot: ResolvedShot): SoundId | null {
   return shot.outcome === REFUSED_SHOT ? null : gunfireSoundFor(shot.weapon);
 }
 
+/**
+ * The gunfire for the shots one frame resolved (FR-011). The count comes from
+ * 007's `shotsFired`, which is defined as shots that left the barrel with
+ * refusals excluded, so a delta of it is a count of resolved events and a shot
+ * refused for ammo can never reach this function at all (US3-S4). Bounded by the
+ * caller's `limit`, because one long frame may resolve a burst and the voice cap
+ * would only throw the excess away again.
+ */
+export function gunfireForResolvedShots(
+  weapon: WeaponKind,
+  shots: number,
+  limit: number,
+): SoundId[] {
+  if (!Number.isFinite(shots) || shots <= 0) return [];
+  const count = Math.min(Math.floor(shots), Math.max(0, Math.floor(limit)));
+  return new Array<SoundId>(count).fill(gunfireSoundFor(weapon));
+}
+
 /** A door's state on two successive frames. */
 export interface DoorTransition {
   readonly from: DoorState;
