@@ -9,6 +9,7 @@ import {
 import type { MapDerivations } from '../../src/materials/maps';
 import {
   createMaterialDiagnostics,
+  fallbackDecisionLine,
   materialDiagnostics,
   publishMaterialDiagnostics,
   recordFallback,
@@ -166,6 +167,18 @@ describe('US2-S7: a failed derivation degrades, it does not stall', () => {
     recordFallback({ material: 'steel', map: 'normal', reason: 'second' });
     expect(materialDiagnostics().fallbacks).toHaveLength(1);
     expect(materialDiagnostics().fallbacks[0]?.reason).toBe('first');
+  });
+
+  it('formats the DECISIONS.md line the same degradation is recorded as', () => {
+    buildMaterialMaps('steel', SIZE, throwingNormal);
+    const fallback = materialDiagnostics().fallbacks[0]!;
+    const line = fallbackDecisionLine('2026-08-31', fallback);
+    expect(line.startsWith('- 2026-08-31 | 005-materials | ')).toBe(true);
+    expect(line).toContain('steel');
+    expect(line).toContain('normal');
+    expect(line).toContain('synthetic normal failure');
+    expect(line).toContain('FR-007');
+    expect(line.includes('\n')).toBe(false);
   });
 
   it('records no fallback at all on the happy path', () => {
