@@ -66,7 +66,12 @@ export function createMapTexture(
   size: number,
   kind: MapKind,
 ): DataTexture {
-  const texture = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType);
+  // `DataTexture` is typed against a view over a plain `ArrayBuffer`; a generated
+  // buffer is a view over `ArrayBufferLike`, which is the same bytes. The cast is
+  // the whole reason this module exists: it is the one place the generated data
+  // stops being data and becomes a texture.
+  const view = data as unknown as Uint8ClampedArray & { buffer: ArrayBuffer };
+  const texture = new DataTexture(view, size, size, RGBAFormat, UnsignedByteType);
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
   texture.generateMipmaps = true;
