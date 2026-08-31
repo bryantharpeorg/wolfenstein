@@ -1,199 +1,94 @@
 import { describe, it, expect } from 'vitest';
 import {
-  GUARD_HIT_RADIUS,
-  NO_GUARD,
-  outOfAmmoResult,
-  traceShot,
-  type HitscanGuard,
-  type ShotOutcome,
-  type TraceOptions,
+  GUARD_HIT_RADIUS, NO_GUARD, outOfAmmoResult, traceShot, type HitscanGuard, type ShotOutcome,
+  type ShotResult, type TraceOptions,
 } from '../../src/combat/hitscan';
 
-// FR-006 and US1-S6..S8 plus SC-008 and the ray Edge Cases. Every distance below
-// is hand-computed from the fixture rather than read back off the implementation.
-//
-// The fixture: a 9-wide corridor on row 1, walls all round. Cells x=1..7 are open
-// on that row, so a ray fired east from (1.5, 1.5) meets the wall at x=8.
-const CORRIDOR: string[] = [
-  '111111111',
-  '100000001',
-  '111111111',
-];
-
-const EAST = { x: 1, z: 0 };
+// FR-006, US1-S6..S8, SC-008, Edge Cases. Every distance is hand-computed from
+// the fixture, not read off the implementation: a corridor open at x=1..7, so a
+// ray east from (1.5, 1.5) meets the wall face at x=8, 6.5 cells out.
+const CORRIDOR = ['111111111', '100000001', '111111111'];
+const DOORED = ['111111111', '10000D001', '111111111'];
+const WALLED = ['111111111', '100010001', '111111111'];
 const ORIGIN = { x: 1.5, z: 1.5 };
-const CLOSED = new Set<string>();
 const DAMAGE = 11;
-const FAR = 100;
 
-function shoot(overrides: Partial<TraceOptions> = {}) {
-  const options: TraceOptions = {
+const shoot = (overrides: Partial<TraceOptions> = {}): ShotResult =>
+  traceShot({
     grid: CORRIDOR,
-    doorStates: CLOSED,
+    doorStates: new Set<string>(),
     guards: [],
     origin: ORIGIN,
-    direction: EAST,
-    maxRange: FAR,
+    direction: { x: 1, z: 0 },
+    maxRange: 100,
     damage: DAMAGE,
     ...overrides,
-  };
-  return traceShot(options);
-}
-
-/** Where a ray fired east from ORIGIN first touches a guard standing at `x`. */
-function entryDistance(x: number): number {
-  return x - ORIGIN.x - GUARD_HIT_RADIUS;
-}
-
-describe('a guard on a clear line (FR-006, US1-S6)', () => {
-  it('names the guard, which guard, the distance and the declared damage', () => {
-    const guards: HitscanGuard[] = [{ x: 5.5, z: 1.5 }];
-    const result = shoot({ guards });
-    expect(result.outcome).toBe('guard');
-    expect(result.guardIndex).toBe(0);
-    expect(result.distance).toBeCloseTo(entryDistance(5.5), 10);
-    expect(result.damage).toBe(DAMAGE);
   });
 
-  it('identifies the guard by its index in the list it was given', () => {
-    const guards: HitscanGuard[] = [
-      { x: 3.5, z: 5.5 },
-      { x: 6.5, z: 1.5 },
-      { x: 2.5, z: 7.5 },
-    ];
-    const result = shoot({ guards });
-    expect(result.guardIndex).toBe(1);
-    expect(result.distance).toBeCloseTo(entryDistance(6.5), 10);
+/** A guard on the corridor row unless placed off it. */
+const g = (x: number, z = 1.5, alive?: boolean): HitscanGuard => ({ x, z, alive });
+
+/** Where a ray east from ORIGIN first touches a guard standing at `x`. */
+const entry = (x: number) => x - ORIGIN.x - GUARD_HIT_RADIUS;
+
+/** name, trace overrides, outcome, damage, distance, guardIndex. */
+type Case = [string, Partial<TraceOptions>, ShotOutcome, number, number?, number?];
+
+const NEAR_MISS = 1.5 + GUARD_HIT_RADIUS * 2;
+const GRAZE = 1.5 + GUARD_HIT_RADIUS / 2;
+
+const CASES: Case[] = [
+  // A guard on a clear line (US1-S6): named, identified, measured, damaged.
+  ['a guard on a clear line', { guards: [g(5.5)] }, 'guard', DAMAGE, entry(5.5), 0],
+  ['the guard at its index in the list', { guards: [g(3.5, 5.5), g(6.5), g(2.5, 7.5)] }, 'guard', DAMAGE, entry(6.5), 1],
+  ['only the nearer of two guards on one ray', { guards: [g(6.5), g(3.5)] }, 'guard', DAMAGE, entry(3.5), 1],
+  ['a guard in front of a wall, never the wall', { guards: [g(7.5)] }, 'guard', DAMAGE, entry(7.5), 0],
+  ['a graze just inside the hit radius', { guards: [g(5.5, GRAZE)] }, 'guard', DAMAGE],
+  ['a miss just outside it', { guards: [g(5.5, NEAR_MISS)] }, 'wall', 0],
+  ['no hit on a guard behind the camera', { guards: [g(0.5)] }, 'wall', 0],
+  ['no hit on a guard already dead', { guards: [g(5.5, 1.5, false)] }, 'wall', 0],
+
+  // A wall or a closed door terminates the ray (US1-S7): zero damage, no guard.
+  ['a wall at the hand-computed distance', {}, 'wall', 0, 6.5, NO_GUARD],
+  ['a wall, zero damage to the guard behind it', { grid: WALLED, guards: [g(6.5)] }, 'wall', 0, 2.5, NO_GUARD],
+  ['a closed door as a wall', { grid: DOORED, guards: [g(7.5)] }, 'wall', 0, 3.5, NO_GUARD],
+  ['the same door opened as air', { grid: DOORED, guards: [g(7.5)], doorStates: new Set(['5,1']) }, 'guard', DAMAGE, entry(7.5), 0],
+  // A pinwheel: the open diagonal at (2,2) is reachable only through a corner
+  // walls flank on both sides, exactly as 006's sight walk refuses it.
+  ['no pass through a corner both cells flank', { grid: ['1111', '1011', '1101', '1111'], guards: [g(2.5, 2.5)], direction: { x: 1, z: 1 } }, 'wall', 0, undefined, NO_GUARD],
+
+  // Nothing within range (US1-S8): `none`, never an empty outcome.
+  ['none, with the range flown, when nothing is in reach', { maxRange: 2 }, 'none', 0, 2, NO_GUARD],
+  ['none for a guard beyond the declared maximum range', { guards: [g(5.5)], maxRange: 2 }, 'none', 0, 2],
+  // The grid edge blocks 1.5 cells north, so a range of 1 reaches nothing.
+  ['none when the range runs out before any blocker', { grid: ['00000', '00000', '00000'], origin: { x: 2.5, z: 1.5 }, direction: { x: 0, z: -1 }, maxRange: 1 }, 'none', 0, 1],
+
+  // The ray's own arithmetic.
+  ['a direction normalised, so range is in cells', { direction: { x: 4, z: 0 } }, 'wall', 0, 6.5],
+  ['none, not NaN, for a zero direction', { direction: { x: 0, z: 0 } }, 'none', 0, 0],
+  // The ray leaves the room through the corner at (4,4): 2.5 cells on each axis.
+  ['a diagonal measured in cells, not steps', { grid: ['11111', '10001', '10001', '10001', '11111'], direction: { x: 1, z: 1 } }, 'wall', 0, Math.hypot(2.5, 2.5)],
+];
+
+describe('one ray, one outcome (FR-006, US1-S6, US1-S7, US1-S8)', () => {
+  it.each(CASES)('resolves %s', (_name, shot, outcome, damage, distance, guardIndex) => {
+    const result = shoot(shot);
+    expect(result.outcome).toBe(outcome);
+    expect(result.damage).toBe(damage);
+    if (distance !== undefined) expect(result.distance).toBeCloseTo(distance, 10);
+    if (guardIndex !== undefined) expect(result.guardIndex).toBe(guardIndex);
   });
 
-  it('takes only the nearer of two guards on one ray — no penetration (Edge Cases)', () => {
-    const guards: HitscanGuard[] = [{ x: 6.5, z: 1.5 }, { x: 3.5, z: 1.5 }];
-    const result = shoot({ guards });
-    expect(result.outcome).toBe('guard');
-    expect(result.guardIndex).toBe(1);
-    expect(result.distance).toBeCloseTo(entryDistance(3.5), 10);
-  });
-
-  it('reports a guard standing in front of a wall as guard, never wall (Edge Cases)', () => {
-    // The wall is at x=8, distance 6.5; the guard is nearer, so the body absorbs it.
-    const result = shoot({ guards: [{ x: 7.5, z: 1.5 }] });
-    expect(result.outcome).toBe('guard');
-    expect(result.distance).toBeLessThan(8 - ORIGIN.x);
-  });
-
-  it('misses a guard standing further off the ray than the declared hit radius', () => {
-    const justOff = 1.5 + GUARD_HIT_RADIUS * 2;
-    expect(shoot({ guards: [{ x: 5.5, z: justOff }] }).outcome).toBe('wall');
-    // ... and grazes one just inside it.
-    const justOn = 1.5 + GUARD_HIT_RADIUS / 2;
-    expect(shoot({ guards: [{ x: 5.5, z: justOn }] }).outcome).toBe('guard');
-  });
-
-  it('ignores a guard behind the camera and one already dead', () => {
-    expect(shoot({ guards: [{ x: 0.5, z: 1.5 }] }).outcome).toBe('wall');
-    expect(shoot({ guards: [{ x: 5.5, z: 1.5, alive: false }] }).outcome).toBe('wall');
-  });
-});
-
-describe('a wall or a closed door terminates the ray (FR-006, US1-S7)', () => {
-  it('reports wall at the hand-computed distance with zero damage', () => {
-    const result = shoot();
-    expect(result.outcome).toBe('wall');
-    // The corridor is open through x=7; the wall face is the x=8 boundary.
-    expect(result.distance).toBeCloseTo(8 - ORIGIN.x, 10);
-    expect(result.damage).toBe(0);
-    expect(result.guardIndex).toBe(NO_GUARD);
-  });
-
-  it('applies zero damage to a guard standing behind that wall', () => {
-    // Guard at x=6.5 in the row below is off the ray; the one that matters is the
-    // wall in between: a shot east from a walled-off pocket dies at the wall.
-    const boxed: string[] = ['111111111', '100010001', '111111111'];
-    const result = traceShot({
-      grid: boxed,
-      doorStates: CLOSED,
-      guards: [{ x: 6.5, z: 1.5 }],
-      origin: ORIGIN,
-      direction: EAST,
-      maxRange: FAR,
-      damage: DAMAGE,
-    });
-    expect(result.outcome).toBe('wall');
-    expect(result.distance).toBeCloseTo(4 - ORIGIN.x, 10);
-    expect(result.damage).toBe(0);
-    expect(result.guardIndex).toBe(NO_GUARD);
-  });
-
-  it('treats a closed door as a wall and an open one as air', () => {
-    const doored: string[] = ['111111111', '10000D001', '111111111'];
-    const guards: HitscanGuard[] = [{ x: 7.5, z: 1.5 }];
-    const base = { grid: doored, guards, origin: ORIGIN, direction: EAST, maxRange: FAR, damage: DAMAGE };
-
-    const shut = traceShot({ ...base, doorStates: CLOSED });
-    expect(shut.outcome).toBe('wall');
-    expect(shut.distance).toBeCloseTo(5 - ORIGIN.x, 10);
-    expect(shut.damage).toBe(0);
-
-    const open = traceShot({ ...base, doorStates: new Set(['5,1']) });
-    expect(open.outcome).toBe('guard');
-    expect(open.damage).toBe(DAMAGE);
-  });
-
-  it('does not let the ray pass a corner whose two flanking cells both block', () => {
-    // A pinwheel: the open diagonal at (2,2) is reachable only through a corner
-    // that walls flank on both sides, exactly as 006's sight walk refuses it.
-    const pinwheel: string[] = ['1111', '1011', '1101', '1111'];
-    const result = traceShot({
-      grid: pinwheel,
-      doorStates: CLOSED,
-      guards: [{ x: 2.5, z: 2.5 }],
-      origin: { x: 1.5, z: 1.5 },
-      direction: { x: 1, z: 1 },
-      maxRange: FAR,
-      damage: DAMAGE,
-    });
-    expect(result.outcome).toBe('wall');
-  });
-});
-
-describe('nothing within range (FR-006, US1-S8)', () => {
-  it('names none rather than an empty outcome, and reports the range it flew', () => {
-    const result = shoot({ maxRange: 2 });
-    expect(result.outcome).toBe('none');
-    expect(result.distance).toBe(2);
-    expect(result.damage).toBe(0);
-    expect(result.guardIndex).toBe(NO_GUARD);
-  });
-
-  it('does not reach a guard that stands beyond the declared maximum range', () => {
-    expect(shoot({ guards: [{ x: 5.5, z: 1.5 }], maxRange: 2 }).outcome).toBe('none');
-  });
-
-  it('names none when the range runs out before any blocker', () => {
-    const open: string[] = ['00000', '00000', '00000'];
-    const result = traceShot({
-      grid: open,
-      doorStates: CLOSED,
-      guards: [],
-      origin: { x: 2.5, z: 1.5 },
-      direction: { x: 0, z: -1 },
-      // The grid's own edge blocks at 1.5 cells, so 1 leaves nothing in reach.
-      maxRange: 1,
-      damage: DAMAGE,
-    });
-    expect(result.outcome).toBe('none');
-    expect(result.distance).toBe(1);
+  it('lets a body in front of a wall absorb the shot the wall would have stopped', () => {
+    expect(shoot({ guards: [g(7.5)] }).distance).toBeLessThan(6.5);
   });
 });
 
 describe('the result shape is total (FR-006, SC-008)', () => {
+  const everyOutcome = [shoot({ guards: [g(4.5)] }), shoot(), shoot({ maxRange: 2 }), outOfAmmoResult()];
+
   it('always returns all four fields, never undefined', () => {
-    for (const result of [
-      shoot(),
-      shoot({ guards: [{ x: 4.5, z: 1.5 }] }),
-      shoot({ maxRange: 2 }),
-      outOfAmmoResult(),
-    ]) {
+    for (const result of everyOutcome) {
       expect(result).toBeDefined();
       expect(typeof result.outcome).toBe('string');
       expect(Number.isFinite(result.distance)).toBe(true);
@@ -205,39 +100,7 @@ describe('the result shape is total (FR-006, SC-008)', () => {
   });
 
   it('produces every declared outcome, so no branch of FR-006 ships unexercised', () => {
-    const produced = new Set<ShotOutcome>([
-      shoot({ guards: [{ x: 4.5, z: 1.5 }] }).outcome,
-      shoot().outcome,
-      shoot({ maxRange: 2 }).outcome,
-      outOfAmmoResult().outcome,
-    ]);
+    const produced = new Set<ShotOutcome>(everyOutcome.map((r) => r.outcome));
     expect([...produced].sort()).toEqual(['guard', 'none', 'out-of-ammo', 'wall']);
-  });
-
-  it('normalises the direction it is handed, so range is measured in cells', () => {
-    const doubled = shoot({ direction: { x: 4, z: 0 } });
-    expect(doubled.distance).toBeCloseTo(8 - ORIGIN.x, 10);
-  });
-
-  it('refuses a zero direction with none rather than a NaN distance', () => {
-    const result = shoot({ direction: { x: 0, z: 0 } });
-    expect(result.outcome).toBe('none');
-    expect(Number.isFinite(result.distance)).toBe(true);
-  });
-
-  it('measures a diagonal ray in cells, not in cell steps', () => {
-    const room: string[] = ['11111', '10001', '10001', '10001', '11111'];
-    const result = traceShot({
-      grid: room,
-      doorStates: CLOSED,
-      guards: [],
-      origin: { x: 1.5, z: 1.5 },
-      direction: { x: 1, z: 1 },
-      maxRange: FAR,
-      damage: DAMAGE,
-    });
-    expect(result.outcome).toBe('wall');
-    // The ray leaves the room through the corner at (4,4): 2.5 cells on each axis.
-    expect(result.distance).toBeCloseTo(Math.hypot(2.5, 2.5), 10);
   });
 });

@@ -1,20 +1,14 @@
 /**
  * The combat system (order 70): the DOM and render edge of US1. Every decision
- * lives in `src/combat/` and is tested without a page; this file binds the two
- * fire bindings and the three select keys to the one command path, steps the
- * gate once per frame with the frame delta, traces whatever the gate resolved
- * from the camera centre, and publishes what the harness reads (FR-006, FR-008,
- * FR-018).
- *
- * `src/main.ts` is not edited — 001's glob discovery finds this file — and
- * neither is `src/diag/diag.ts`: the `combat` field arrives by the module
- * augmentation in `src/combat/combat-diag.ts`.
- *
- * It runs after the player systems (30-36), so the ray is traced from where this
- * frame left the camera, and after the enemies system (60), so a guard is shot
- * where this frame's tick left it. The ray originates at the camera centre and
- * nowhere else: US4's view-model is cosmetic and is never a ray origin
- * (Clarifications, US4-S8).
+ * lives in `src/combat/` and is tested without a page; this file binds the fire
+ * bindings and the select keys to the one command path, steps the gate once per
+ * frame, traces what it resolved from the camera centre, and publishes what the
+ * harness reads (FR-006, FR-008, FR-018). Neither `src/main.ts` nor
+ * `src/diag/diag.ts` is edited: 001's glob discovery finds this file and `combat`
+ * arrives by module augmentation. Order 70 is after the player systems (30-36)
+ * and enemies (60), so the ray leaves from where the frame left the camera and a
+ * guard is shot where its tick left it — from the camera centre and nowhere else,
+ * US4's view-model being cosmetic (Clarifications, US4-S8).
  */
 import { Vector3 } from 'three';
 import { defineSystem, type GameContext } from '../../boot/registry';
@@ -23,13 +17,8 @@ import { openTiles } from '../../interaction/open-state';
 import type { OpenState } from '../../player/tiles';
 import { ensureCombatDiag, publishAmmo, type CombatDiagnostics } from '../../combat/combat-diag';
 import {
-  createFireControl,
-  createFireInput,
-  fireSourceForKeyCode,
-  fireSourceForMouseButton,
-  stepFireControl,
-  type FireControlState,
-  type FireInput,
+  createFireControl, createFireInput, fireSourceForKeyCode, fireSourceForMouseButton,
+  stepFireControl, type FireControlState, type FireInput,
 } from '../../combat/fire-control';
 import { traceShot, type HitscanGuard, type ShotResult } from '../../combat/hitscan';
 import { SPREAD_SEED, spreadDirection } from '../../combat/spread';
@@ -38,9 +27,6 @@ import { weaponForKeyCode, type WeaponKind } from '../../combat/weapons';
 import { getEnemyWorld } from '../enemies/register';
 
 const MILLISECONDS_PER_SECOND = 1000;
-
-/** Stands in until the first shot of a frame asks for the real one. */
-const EMPTY_DOOR_STATE: OpenState = new Set<string>();
 
 let control: FireControlState | null = null;
 let input: FireInput | null = null;
@@ -54,14 +40,11 @@ const countedDead = new Set<string>();
 let hits = 0;
 let kills = 0;
 
-// Scratch vectors, allocated once: the ray is traced every frame a shot resolves
-// and must not mint garbage to do it.
+// Scratch vectors, allocated once: a traced frame must mint no garbage.
 const cameraPosition = new Vector3();
 const cameraForward = new Vector3();
 
-/** The run's fire control, or null before setup. US2's restart resets the
- *  magazine and the active weapon through this rather than by reaching into a
- *  module global of its own. */
+/** What US2's restart resets the magazine and active weapon through. */
 export function getFireControl(): FireControlState | null {
   return control;
 }
@@ -91,8 +74,8 @@ function bindCommands(): void {
     if (source != null) input?.release(source);
   });
 
-  // The second binding of the same command, not a second command: both reach the
-  // gate as one held flag, so both down on one frame is still one shot (US1-S10).
+  // The same command's second binding, not a second command: both reach the gate
+  // as one flag, so both down on a frame is one shot (US1-S10).
   window.addEventListener('mousedown', (event: MouseEvent) => {
     const source = fireSourceForMouseButton(event.button);
     if (source != null) input?.press(source);
@@ -107,26 +90,10 @@ function bindCommands(): void {
   window.addEventListener('blur', () => input?.clear());
 }
 
-/** The live guards, as the hitscan sees them: cell positions and whether they
- *  can still be hit. Built only on a frame that actually resolves a shot. */
-function liveGuards(): { targets: HitscanGuard[]; ids: string[] } {
-  const world = getEnemyWorld();
-  const targets: HitscanGuard[] = [];
-  const ids: string[] = [];
-  if (world == null) return { targets, ids };
-  for (const record of world.records) {
-    targets.push({ x: record.guard.x, z: record.guard.z, alive: record.state !== 'death' });
-    ids.push(record.id);
-  }
-  return { targets, ids };
-}
-
-/** Newly dead guards, counted once each. Nothing but the player's own fire
- *  damages a guard at this milestone, so a death is a kill. */
+/** Newly dead guards, counted once each: nothing but the player's fire damages
+ *  a guard yet, so a death is a kill. */
 function countKills(): void {
-  const world = getEnemyWorld();
-  if (world == null) return;
-  for (const record of world.records) {
+  for (const record of getEnemyWorld()?.records ?? []) {
     if (record.state !== 'death' || countedDead.has(record.id)) continue;
     countedDead.add(record.id);
     kills += 1;
@@ -136,12 +103,11 @@ function countKills(): void {
 function resolveShots(ctx: GameContext, deltaSeconds: number): void {
   if (control == null || input == null) return;
 
-  // Everything the trace needs is gathered on the first shot of the frame and
-  // not before: most frames resolve none, and a per-frame guard list would be
-  // garbage minted for nothing.
+  // Gathered on the frame's first shot and not before: most frames fire none, and
+  // a per-frame guard list would be garbage minted for nothing.
   let targets: HitscanGuard[] | null = null;
-  let ids: string[] = [];
-  let doorStates: OpenState = EMPTY_DOOR_STATE;
+  const ids: string[] = [];
+  let doorStates: OpenState = new Set<string>();
   const origin = { x: 0, z: 0 };
   const forward = { x: 0, y: 0, z: 0 };
 
@@ -154,10 +120,12 @@ function resolveShots(ctx: GameContext, deltaSeconds: number): void {
     forward.x = cameraForward.x;
     forward.y = cameraForward.y;
     forward.z = cameraForward.z;
-    const live = liveGuards();
-    targets = live.targets;
-    ids = live.ids;
     doorStates = openTiles();
+    targets = [];
+    for (const record of getEnemyWorld()?.records ?? []) {
+      targets.push({ x: record.guard.x, z: record.guard.z, alive: record.state !== 'death' });
+      ids.push(record.id);
+    }
     return targets;
   };
 
@@ -208,8 +176,8 @@ defineSystem({
   update(ctx, deltaMs) {
     if (control == null || input == null) return;
 
-    // The one gate FR-010 closes on death: no command resolves while it is shut,
-    // and a trigger still held when it reopens does not fire the frames it missed.
+    // The gate FR-010 closes on death: nothing resolves while it is shut, and a
+    // trigger held across it does not fire the frames it missed.
     if (commandsResolve()) {
       resolveShots(ctx, deltaMs / MILLISECONDS_PER_SECOND);
     } else {
