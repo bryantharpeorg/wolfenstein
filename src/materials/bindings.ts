@@ -14,7 +14,7 @@
 //     asked of a secret, which is why `adjacentWallMaterials` exists here rather
 //     than in a test: the rule is checked against the shipped grid.
 
-import { DEFAULT_WALL_MATERIAL, WALL_MATERIALS } from '../level';
+import { CEILING_Y, DEFAULT_WALL_MATERIAL, FLOOR_Y, TILE_SIZE, WALL_MATERIALS } from '../level';
 import { recordFallback } from './diagnostics';
 import type { MaterialName } from './table';
 
@@ -151,4 +151,158 @@ export function adjacentWallMaterials(
     if (material != null && !found.includes(material)) found.push(material);
   }
   return found;
+}
+
+// --- Recognising a surface from the geometry it is drawn as ----------------
+//
+// 002 owns the merged level meshes and 004 owns the door leaves, the push-wall
+// blocks and both shells; this spec edits neither, and neither labels its meshes.
+// So a mesh is recognised by where its vertices lie, against the same grid that
+// produced them. That keeps the recognition pure, and therefore tested — the
+// alternative is a `userData` tag, which would mean editing four files this spec
+// is not allowed to touch and trusting them to keep setting it.
+
+/** Slack on a tile boundary, in world units. Every vertex of an axis-aligned
+ * face lies exactly on one, so this only absorbs float32 rounding. */
+const TILE_EPSILON = 1e-4;
+
+/** How close to an axis a normal must be to count as facing along it. A wall
+ * face and a floor quad are exactly axis-aligned; a prop's facets are not, and
+ * are meant to fall through to `unknown`. */
+const AXIS_TOLERANCE = 0.999;
+
+/** How far a horizontal quad's centroid may sit from the declared floor or
+ * ceiling plane, in world units, and still be that plane. */
+const PLANE_EPSILON = 1e-3;
+
+export interface SurfaceOffset {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+const ORIGIN: SurfaceOffset = { x: 0, y: 0, z: 0 };
+
+const UNKNOWN: Surface = { kind: 'unknown' };
+
+function isWallCell(cell: string | undefined): boolean {
+  return cell != null && cell >= '1' && cell <= '9';
+}
+
+/** The two tile indices a world coordinate can belong to: one, or two where it
+ * sits exactly on a boundary and so touches the tile on either side. */
+function tileCandidates(value: number): readonly number[] {
+  const low = Math.floor((value - TILE_EPSILON) / TILE_SIZE);
+  const high = Math.floor((value + TILE_EPSILON) / TILE_SIZE);
+  return low === high ? [low] : [low, high];
+}
+
+/** Whether every vertex of the buffer stands on a tile of `cell` — true of the
+ * faces 002 emitted for a `D` or `S` tile, of 004's leaf and block, and of both
+ * of its shells, and of nothing else in the level. */
+function allVerticesOnCell(
+  positions: ArrayLike<number>,
+  offset: SurfaceOffset,
+  grid: readonly string[],
+  cell: string,
+): boolean {
+  for (let i = 0; i + 2 < positions.length; i += 3) {
+    const x = positions[i]! + offset.x;
+    const z = positions[i + 2]! + offset.z;
+    let found = false;
+    for (const tx of tileCandidates(x)) {
+      for (const tz of tileCandidates(z)) {
+        if (grid[tz]?.[tx] === cell) found = true;
+      }
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+
+/** One triangle's surface, from its centroid and the normal it faces. */
+function classifyTriangle(
+  cx: number,
+  cy: number,
+  cz: number,
+  nx: number,
+  ny: number,
+  nz: number,
+  grid: readonly string[],
+): Surface {
+  if (ny >= AXIS_TOLERANCE) {
+    return Math.abs(cy - FLOOR_Y) <= PLANE_EPSILON ? { kind: 'floor' } : UNKNOWN;
+  }
+  if (ny <= -AXIS_TOLERANCE) {
+    return Math.abs(cy - CEILING_Y) <= PLANE_EPSILON ? { kind: 'ceiling' } : UNKNOWN;
+  }
+  // A vertical face lies on the plane between the tile it belongs to and the open
+  // tile it is seen from, so the normal is the only thing that says which is
+  // which: step half a tile back along it and read the cell there.
+  if (Math.abs(ny) > 1 - AXIS_TOLERANCE) return UNKNOWN;
+  const tx = Math.floor((cx - (nx * TILE_SIZE) / 2) / TILE_SIZE);
+  const tz = Math.floor((cz - (nz * TILE_SIZE) / 2) / TILE_SIZE);
+  const cell = grid[tz]?.[tx];
+  return isWallCell(cell) ? { kind: 'wall', type: cell! } : UNKNOWN;
+}
+
+function sameSurface(a: Surface, b: Surface): boolean {
+  return a.kind === b.kind && a.type === b.type;
+}
+
+/**
+ * What a mesh is, from its vertices alone (FR-008). `indices` is the geometry's
+ * index buffer where it has one; `offset` is the mesh's own position, so a door
+ * leaf drawn in local coordinates is still recognised by the tile it stands on.
+ *
+ * Door and secret tiles are tested first and as a whole-mesh property, because
+ * both of 004's shells mix floor, ceiling and jamb quads that would otherwise
+ * classify three different ways and resolve to `unknown`.
+ *
+ * A mesh whose triangles disagree is `unknown`, not a majority vote: guessing a
+ * wall type for a prop is how a health pack ends up rendered as brick.
+ */
+export function classifySurface(
+  positions: ArrayLike<number>,
+  normals: ArrayLike<number>,
+  indices: ArrayLike<number> | null,
+  grid: readonly string[],
+  offset: SurfaceOffset = ORIGIN,
+): Surface {
+  if (positions.length === 0 || normals.length !== positions.length) return UNKNOWN;
+
+  if (allVerticesOnCell(positions, offset, grid, 'D')) return { kind: 'door' };
+  if (allVerticesOnCell(positions, offset, grid, 'S')) return { kind: 'secret' };
+
+  const count = indices != null ? indices.length : positions.length / 3;
+  if (count < 3) return UNKNOWN;
+
+  let agreed: Surface | null = null;
+  for (let triangle = 0; triangle + 2 < count; triangle += 3) {
+    const v = [0, 1, 2].map((corner) =>
+      indices != null ? indices[triangle + corner]! : triangle + corner,
+    );
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    for (const vertex of v) {
+      cx += positions[vertex * 3]!;
+      cy += positions[vertex * 3 + 1]!;
+      cz += positions[vertex * 3 + 2]!;
+    }
+    const first = v[0]! * 3;
+    const surface = classifyTriangle(
+      cx / 3 + offset.x,
+      cy / 3 + offset.y,
+      cz / 3 + offset.z,
+      normals[first]!,
+      normals[first + 1]!,
+      normals[first + 2]!,
+      grid,
+    );
+    if (surface.kind === 'unknown') return UNKNOWN;
+    if (agreed == null) agreed = surface;
+    else if (!sameSurface(agreed, surface)) return UNKNOWN;
+  }
+  return agreed ?? UNKNOWN;
 }

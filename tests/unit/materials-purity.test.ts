@@ -31,7 +31,15 @@ function tsFilesUnder(dir: string): string[] {
   return found;
 }
 
+// The generator/adapter seam (plan.md, Structure Decision): exactly one module
+// under `src/materials/` may reach three.js, and it does nothing but wrap a
+// finished buffer. Naming it here rather than dropping the assertion is the
+// point — the claim tightens from "no file imports three" to "one named file
+// does, and it is the adapter".
+const ADAPTER = 'texture-adapter.ts';
+
 const materialFiles = tsFilesUnder(MATERIALS_DIR).sort();
+const generatingFiles = materialFiles.filter((path) => !path.endsWith(ADAPTER));
 const sources = new Map(materialFiles.map((path) => [path, readFileSync(path, 'utf8')]));
 
 describe('generating-path purity', () => {
@@ -49,8 +57,15 @@ describe('generating-path purity', () => {
     );
   });
 
-  it.each(materialFiles)('%s imports three nowhere', (path: string) => {
+  it.each(generatingFiles)('%s imports three nowhere', (path: string) => {
     expect(THREE_IMPORT.test(sources.get(path)!)).toBe(false);
+  });
+
+  it('lets exactly one module reach three.js, and it is the texture adapter', () => {
+    const importers = materialFiles
+      .filter((path) => THREE_IMPORT.test(sources.get(path)!))
+      .map((path) => path.slice(MATERIALS_DIR.length));
+    expect(importers).toEqual([ADAPTER]);
   });
 
   it.each(materialFiles)('%s touches no browser API', (path: string) => {
