@@ -47,20 +47,16 @@ const LABEL_COLUMN = 190, VALUE_COLUMN = 560;
  *  press both bindings see is still one reset (FR-007). */
 const RESTART_KEY_CODE = 'KeyR';
 
-interface Surface {
-  readonly canvas: HTMLCanvasElement;
-  readonly context: CanvasRenderingContext2D;
-  signature: string | null;
-}
-
 let combat: CombatDiagnostics | null = null;
 let interaction: InteractionDiagnostics | null = null;
 let runDiag: RunDiagnostics | null = null;
-let surface: Surface | null = null;
+let context: CanvasRenderingContext2D | null = null;
+/** What was last composited, so a screen left up re-uploads no texture per frame. */
+let signature: string | null = null;
 let texture: CanvasTexture | null = null;
 let quad: Mesh | null = null;
 
-/** What the screen last composited, so the harness can read as text what a texture cannot
+/** What the screen last composited, so the harness reads as text what a texture cannot
  *  give back, in the shape `window.__hud` established (US2-S1, US2-S2). */
 export interface RunHarness {
   /** 007's restart command, issued exactly as the screen's own key issues it. */
@@ -78,14 +74,6 @@ declare global {
 
 let drawn: readonly StatsLine[] | null = null;
 
-function createSurface(): Surface | null {
-  const canvas = document.createElement('canvas');
-  canvas.width = SCREEN_CANVAS_WIDTH;
-  canvas.height = SCREEN_CANVAS_HEIGHT;
-  const context = canvas.getContext('2d');
-  return context == null ? null : { canvas, context, signature: null };
-}
-
 function fitQuad(ctx: GameContext): void {
   if (quad == null) return;
   const viewHeight = 2 * SCREEN_DISTANCE * Math.tan((ctx.camera.fov * DEGREES_TO_RADIANS) / 2);
@@ -95,14 +83,12 @@ function fitQuad(ctx: GameContext): void {
   quad.position.set(0, 0, -SCREEN_DISTANCE);
 }
 
-/** Composites the screen, reporting whether the canvas changed so a screen left up
- *  re-uploads no texture per frame. */
-function drawScreen(target: Surface, lines: readonly StatsLine[]): boolean {
-  const signature = lines.map((line) => `${line.label}=${line.value}`).join('|');
-  if (signature === target.signature) return false;
-  target.signature = signature;
+/** Composites the screen, reporting whether the canvas changed. */
+function drawScreen(context: CanvasRenderingContext2D, lines: readonly StatsLine[]): boolean {
+  const drawing = lines.map((line) => `${line.label}=${line.value}`).join('|');
+  if (drawing === signature) return false;
+  signature = drawing;
 
-  const context = target.context;
   context.clearRect(0, 0, SCREEN_CANVAS_WIDTH, SCREEN_CANVAS_HEIGHT);
   context.fillStyle = BACKGROUND;
   context.fillRect(0, 0, SCREEN_CANVAS_WIDTH, SCREEN_CANVAS_HEIGHT);
@@ -158,9 +144,12 @@ defineSystem({
 
     if (ctx.camera.parent == null) ctx.scene.add(ctx.camera);
 
-    surface = createSurface();
-    if (surface != null) {
-      texture = new CanvasTexture(surface.canvas);
+    const surface = document.createElement('canvas');
+    surface.width = SCREEN_CANVAS_WIDTH;
+    surface.height = SCREEN_CANVAS_HEIGHT;
+    context = surface.getContext('2d');
+    if (context != null) {
+      texture = new CanvasTexture(surface);
       texture.colorSpace = SRGBColorSpace;
       texture.minFilter = LinearFilter;
       texture.magFilter = LinearFilter;
@@ -201,13 +190,13 @@ defineSystem({
 
     const complete = state === 'complete';
     if (quad != null) quad.visible = complete;
-    if (!complete || surface == null) {
+    if (!complete || context == null) {
       drawn = null;
       return;
     }
 
     const lines = statsScreenLines(stats, rating);
-    if (drawScreen(surface, lines) && texture != null) texture.needsUpdate = true;
+    if (drawScreen(context, lines) && texture != null) texture.needsUpdate = true;
     drawn = lines;
   },
 
