@@ -440,12 +440,16 @@ async function runNormalPass(browser, url, expectedCounts) {
   if (stability.first.level !== stability.second.level) {
     errors.push('__diag.level changed between two reads 120 frames apart');
   }
-  if (stability.first.fps === stability.second.fps) {
-    errors.push('fps did not change between two reads 120 frames apart');
-  }
-  if (stability.first.frameTimeMs === stability.second.frameTimeMs) {
-    errors.push('frameTimeMs did not change between two reads 120 frames apart');
-  }
+  // US3-S6 wants "__diag.level is stable while the renderer keeps moving". The
+  // level half is asserted above. The moving half used to be asserted as
+  // `first.fps !== second.fps` -- inequality of two sampled floats -- which a
+  // legitimately steady frame rate fails, so it went red at random on CI and
+  // twice stalled a story whose code was correct.
+  //
+  // Liveness is already proven structurally: sampleLevelTwice() only resolves
+  // after 120 requestAnimationFrame callbacks fire, so a frozen renderer hangs
+  // there and times out rather than reaching this line. Asserting the floats
+  // differ adds no coverage and subtracts determinism.
 
   await context.close();
   return { diag: result.diag, errors };

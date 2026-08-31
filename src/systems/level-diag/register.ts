@@ -2,7 +2,13 @@
  * The level-diag system: publishes `window.__diag.level` once, in setup(), so the
  * smoke harness can assert map integrity without a human walking the map. It runs
  * after `level` (order 40) and registers no `update` hook, so the object stays
- * identical across reads while `fps` and `frameTimeMs` keep moving (US3-S6).
+ * identical across reads while the renderer keeps running (US3-S6).
+ *
+ * The smoke harness asserts the stable half directly. It does NOT assert that
+ * `fps`/`frameTimeMs` differ between reads: that is inequality of two sampled
+ * floats, which a steady frame rate legitimately fails. Liveness is proven
+ * instead by the harness awaiting 120 requestAnimationFrame callbacks -- a
+ * frozen renderer never gets past that.
  */
 import { defineSystem } from '../../boot/registry';
 import { LEVEL_GRID, WALL_MATERIALS } from '../../level';
