@@ -218,17 +218,22 @@ function warmPipeline(ctx: GameContext): void {
     compile?: (scene: unknown, camera: unknown) => unknown;
     initTexture?: (texture: unknown) => void;
   };
+  // WebGPU answers `compile` and `render` with promises. Nothing here waits on
+  // one — a renderer that warms asynchronously is still warmer than one that
+  // does not — but a rejection nobody adopted would surface as an unhandled
+  // rejection, which 001's error handlers correctly treat as a page fault.
+  const settled = (result: unknown): void => {
+    const thenable = result as { catch?: (onRejected: () => void) => unknown } | null;
+    if (thenable != null && typeof thenable.catch === 'function') thenable.catch(() => {});
+  };
   try {
     for (const texture of builtTextures()) renderer.initTexture?.(texture);
-    const result = renderer.compile?.(ctx.scene, ctx.camera);
-    // WebGPU answers with a promise; nothing here waits on it, because a
-    // renderer that warms asynchronously is still warmer than one that does not.
-    void result;
+    settled(renderer.compile?.(ctx.scene, ctx.camera));
     // And one frame drawn here, at load: a driver defers the real work of a
     // program link and a mip chain to the draw that first needs it, so the only
     // way to be sure the cost is paid before the loop starts is to pay it. 008's
     // post chain builds itself the same way, for the same reason.
-    ctx.renderer.render(ctx.scene, ctx.camera);
+    settled(ctx.renderer.render(ctx.scene, ctx.camera) as unknown);
   } catch {
     // Warming is an optimisation, never a precondition: a renderer that refuses
     // renders the same frames, one of them more slowly.
