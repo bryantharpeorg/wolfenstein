@@ -31,8 +31,8 @@ import { PORTRAIT_COUNT, portraitShapes } from './portrait';
 /** The composite's pixel size. Fixed rather than viewport-sized: the quad is
  *  scaled to the screen, so a resize never reflows the layout or re-rasterises
  *  the portraits. */
-export const HUD_CANVAS_WIDTH = 1024;
-export const HUD_CANVAS_HEIGHT = 168;
+export const HUD_CANVAS_WIDTH = 1280;
+export const HUD_CANVAS_HEIGHT = 160;
 
 /** The declared display widths (Edge Cases). `__diag.combat.score` keeps reporting
  *  the true value; only these digits are clamped (T037). */
@@ -54,15 +54,15 @@ const LABEL_INK = '#8a94a8';
 const VALUE_INK = '#e8e2c8';
 const KEY_INK: Readonly<Record<KeyKind, string>> = { silver: '#cfd6e0', gold: '#e8c14a' };
 
-const LABEL_ROW = 16;
-const VALUE_ROW = 46;
-const SMALL_ROW_ONE = 46;
+const LABEL_ROW = 14;
+const VALUE_ROW = 44;
+const SMALL_ROW_ONE = 44;
 const SMALL_ROW_TWO = 76;
 
 /** Where each readout starts, left to right, with the portrait between them. */
-const COLUMNS = { score: 20, health: 210, keys: 600, weapon: 800 } as const;
+const COLUMNS = { score: 20, health: 300, keys: 740, weapon: 980 } as const;
 
-const PORTRAIT_BOX = { x: 418, y: 14, width: 104, height: 132 } as const;
+const PORTRAIT_BOX = { x: 594, y: 12, width: 92, height: 124 } as const;
 
 /** Everything the HUD displays, read from live state on the frame it is drawn. */
 export interface HudReadout {

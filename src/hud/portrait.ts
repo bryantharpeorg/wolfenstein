@@ -175,10 +175,10 @@ export function portraitShapes(index: number): readonly PortraitShape[] {
       color: rgb(0.12, 0.13, 0.18),
       width: 0,
       points: [
-        point(centre - 0.035, eyeTop + 0.01),
-        point(centre + 0.035, eyeTop + 0.01),
-        point(centre + 0.035, eyeBottom - 0.01),
-        point(centre - 0.035, eyeBottom - 0.01),
+        point(centre - 0.045, eyeTop + 0.012),
+        point(centre + 0.045, eyeTop + 0.012),
+        point(centre + 0.045, eyeBottom - 0.012),
+        point(centre - 0.045, eyeBottom - 0.012),
       ],
     });
   }
@@ -206,11 +206,13 @@ export function portraitShapes(index: number): readonly PortraitShape[] {
   );
 
   // One streak of blood per rung descended, placed by arithmetic rather than by a
-  // random draw, so the same band is the same face forever (US4-S5).
+  // random draw, so the same band is the same face forever (US4-S5). They run down
+  // the cheeks rather than the brow, where they would sit on top of the eyes and
+  // make two bands hard to tell apart at portrait size.
   for (let streak = 0; streak < index; streak += 1) {
     const across = 0.22 + (0.56 * (streak + 1)) / (index + 1);
-    const top = 0.16 + 0.05 * (streak % 3);
-    const length = 0.12 + 0.05 * (streak % 2);
+    const top = 0.46 + 0.05 * (streak % 3);
+    const length = 0.1 + 0.04 * (streak % 2);
     shapes.push({
       kind: 'stroke',
       color: rgb(0.6, 0.06, 0.07),
