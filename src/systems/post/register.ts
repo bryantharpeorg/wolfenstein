@@ -125,8 +125,10 @@ function publish(ctx: GameContext): void {
   post.viewport = chain?.size() ?? post.viewport;
   post.resizes = resizes;
   if (post.fallbacks.length !== state.fallbacks.length) post.fallbacks = [...state.fallbacks];
-  // 001's budget is the *scene's* draw calls, and it stays that even with eleven bloom
-  // passes in the frame; the frame's whole count is `__diag.post.drawCalls` (US4-S10).
+  // 001's budget is what the *game* draws -- the world plus the readouts over it -- and it
+  // stays that even with eleven bloom passes in the frame, so a composer cannot turn
+  // "under twenty draw calls" into "under twenty full-screen quads". The frame's whole
+  // count, post passes included, is `__diag.post.drawCalls` (US4-S10).
   ctx.diag.drawCalls = sceneDrawCalls;
 }
 
@@ -157,12 +159,16 @@ function renderPostFrame(frame: FrameRenderContext): void {
     }
 
     if (overlays > 0) {
+      const before = readDrawCalls(renderer);
       camera.layers.set(OVERLAY_LAYER);
       const autoClear = renderer.autoClear;
       renderer.autoClear = false;
       renderer.setRenderTarget?.(null);
       renderer.render(frame.scene, camera);
       renderer.autoClear = autoClear;
+      // The readouts are drawn by this story but they are not post-processing: they were
+      // inside 001's budget before the chain existed and they stay inside it.
+      sceneDrawCalls += readDrawCalls(renderer) - before;
     }
 
     frameDrawCalls = readDrawCalls(renderer);
