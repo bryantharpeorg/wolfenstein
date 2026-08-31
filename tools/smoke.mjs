@@ -8,6 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { walkAndReport } from './check-no-binaries.mjs';
 import { SMOKE_FPS_FLOOR } from './smoke-floor.mjs';
+// One line per story, forever: every tools/smoke-checks/*.mjs runs, discovered.
+import { runSmokeChecks } from './smoke-check-runner.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -805,6 +807,14 @@ async function main() {
       fail('Locked door smoke pass failed');
     }
     console.log('Locked door smoke pass: refused by name, then opened with the key it named');
+
+    const checkFailures = await runSmokeChecks(browser, url, root);
+    if (checkFailures.length > 0) {
+      for (const failure of checkFailures) {
+        console.error(failure);
+      }
+      fail('Smoke check modules failed');
+    }
 
     const noGpu = await runSmokePass(
       browser,
