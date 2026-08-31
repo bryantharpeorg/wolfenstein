@@ -1,23 +1,15 @@
-// [US2] The `__diag.run` shape (FR-008, US2-S7), attached to 001's `Diagnostics`
-// by module augmentation from this file rather than by editing `src/diag/diag.ts` —
-// the same seam `combat/combat-diag.ts` and `interaction/interaction-diag.ts` already
-// use. FR-008, FR-014 and FR-018 add three objects from three stories of one spec, and
-// three one-line additions to one shared interface is the contention the registry and
-// this pattern both exist to avoid.
-//
-// The contract is additive over 001-007: this file declares `run` and touches no field
-// any earlier spec declared, so nothing is renamed, removed or repurposed (US2-S7).
-// Pure: no DOM, no three.js — the object is built here and the system writes into it.
+// [US2] The `__diag.run` shape (FR-008, US2-S7), attached to 001's `Diagnostics` by module
+// augmentation from this file rather than by editing `src/diag/diag.ts` — the seam
+// `combat-diag.ts` already uses, so three stories of one spec do not queue up in one shared
+// interface. Additive: nothing 001-007 declared is renamed, removed or repurposed.
 
 import type { Diagnostics } from '../diag/diag';
 import { ratingBandFor } from './rating';
 import type { RunState } from './state';
 import type { RunStats } from './stats';
 
-/** Every field FR-008 lists, each named for the counter it reports. Only `state`,
- *  `elapsedMs`, `rating` and `completions` are this spec's; the rest are read from
- *  `__diag.combat`, `__diag.interaction` and the guard roster and copied, never
- *  recomputed (FR-006). */
+/** Every field FR-008 lists. Only `state`, `elapsedMs`, `rating` and `completions` are
+ *  this spec's; the rest are copied from the counters that own them (FR-006). */
 export interface RunDiagnostics {
   state: RunState;
   elapsedMs: number;
@@ -32,8 +24,7 @@ export interface RunDiagnostics {
   completions: number;
 }
 
-/** One list for the smoke harness to check the published object against, in the
- *  shape `COMBAT_DIAGNOSTIC_FIELDS` established. */
+/** One list to check the published object against, as `COMBAT_DIAGNOSTIC_FIELDS` does. */
 export const RUN_DIAGNOSTIC_FIELDS = [
   'state', 'elapsedMs', 'kills', 'guardsTotal', 'secretsFound', 'secretsTotal',
   'treasureFound', 'treasureTotal', 'score', 'rating', 'completions',
@@ -56,8 +47,8 @@ export function createRunDiagnostics(): RunDiagnostics {
     treasureFound: 0,
     treasureTotal: 0,
     score: 0,
-    // The band a run that has taken nothing selects, so the field is never null and a
-    // harness reading it before the first completion reads a rating rather than a hole.
+    // The band a run that has taken nothing selects, so a read before the first
+    // completion is a rating rather than a hole.
     rating: ratingBandFor(0).name,
     completions: 0,
   };
@@ -69,13 +60,8 @@ export function ensureRunDiag(diag: Diagnostics): RunDiagnostics {
   return diag.run;
 }
 
-/**
- * Copies one frame's projection into the published object (FR-006, FR-008).
- *
- * Field for field from the `RunStats` the screen is drawn from, so the displayed
- * values and the reported values have one source and cannot drift: there is no path
- * by which `__diag.run.kills` and the "5/8" on the canvas come from different reads.
- */
+/** Copies one frame's projection into the published object (FR-006, FR-008), field for
+ *  field from the `RunStats` the screen is drawn from, so the two cannot drift. */
 export function publishRunDiagnostics(
   run: RunDiagnostics,
   state: RunState,

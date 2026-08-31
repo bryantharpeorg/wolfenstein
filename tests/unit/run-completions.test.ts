@@ -1,20 +1,11 @@
-// T014 (FR-007; US2-S6, US2-S8). The completion counter is the one figure on the stats
-// screen that is *not* a counter an earlier spec owns, so it is the one this spec has to
-// prove for itself: it counts completed runs, it counts each of them once, and it is the
-// only thing 007's reset leaves standing.
-//
-// It is driven here through `stepRun` rather than by calling the counter with a
-// hand-written transition, because "incremented on the `complete` transition
-// `src/run/state.ts` returns" is a claim about that machine's output. A counter that
-// counted a transition the machine never produces would pass a hand-written test and
+// T014 (FR-007; US2-S6, US2-S8). The one figure on the stats screen no earlier spec owns:
+// it counts completed runs, once each, and is the only thing 007's reset leaves standing.
+// It is driven through `stepRun` rather than a hand-written transition, because a counter
+// watching for a transition that machine never produces would pass a hand-written test and
 // fail on the page.
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  completionCount,
-  countCompletion,
-  resetCompletionsForTest,
-} from '../../src/run/completions';
+import { completionCount, countCompletion, resetCompletionsForTest } from '../../src/run/completions';
 import {
   ELEVATOR_TRAVEL_MS,
   beginElevatorExit,
@@ -25,8 +16,7 @@ import {
   type RunTimeline,
 } from '../../src/run/state';
 
-/** One frame: step the run and offer whatever it returned to the counter, which is
- *  exactly what the stats-screen system does per frame. */
+/** One frame, exactly as the stats-screen system spends it. */
 function frame(run: RunTimeline, deltaMs: number): void {
   countCompletion(stepRun(run, deltaMs));
 }
@@ -43,21 +33,17 @@ beforeEach(() => {
 });
 
 describe('the completion counter (FR-007)', () => {
-  it('starts at zero', () => {
+  it('starts at zero and counts nothing on a frame that made no transition', () => {
     expect(completionCount()).toBe(0);
-  });
-
-  it('counts nothing on a frame that made no transition', () => {
     const run = createRun();
     for (let step = 0; step < 20; step += 1) frame(run, 50);
     expect(completionCount()).toBe(0);
   });
 
   it('counts nothing for a transition that is not into `complete`', () => {
-    const run = createRun();
     // `exiting`, then `dead` and back: every transition the machine makes but one.
+    const run = createRun();
     beginElevatorExit(run);
-    expect(completionCount()).toBe(0);
     const dead = createRun();
     setRunDead(dead, true);
     setRunDead(dead, false);
@@ -65,16 +51,11 @@ describe('the completion counter (FR-007)', () => {
     expect(completionCount()).toBe(0);
   });
 
-  it('counts one for one completed run, on the frame the lift arrives', () => {
+  it('counts one for one completed run, however many frames follow it', () => {
     const run = createRun();
     completeRun(run, 1_000);
     expect(run.state).toBe('complete');
     expect(completionCount()).toBe(1);
-  });
-
-  it('counts a completed run once however many frames follow it', () => {
-    const run = createRun();
-    completeRun(run, 1_000);
     for (let step = 0; step < 200; step += 1) frame(run, 16);
     expect(completionCount()).toBe(1);
   });
@@ -84,8 +65,7 @@ describe('the completion counter (FR-007)', () => {
     completeRun(run, 1_000);
     expect(completionCount()).toBe(1);
 
-    // 007's reset, as `resetElevatorRun` applies it: the timeline goes back, the
-    // counter does not.
+    // 007's reset as `resetElevatorRun` applies it: the timeline goes back, not the count.
     resetRunTimeline(run);
     expect(run.state).toBe('playing');
     expect(run.elapsedMs).toBe(0);
@@ -107,13 +87,5 @@ describe('the completion counter (FR-007)', () => {
     // The second run's own timer, not the two runs added together (US2-S8).
     expect(run.elapsedMs).toBeLessThan(firstElapsed);
     expect(run.elapsedMs).toBeCloseTo(1_000 + ELEVATOR_TRAVEL_MS, 6);
-  });
-
-  it('is not restored by its own test seam being the only way back to zero', () => {
-    const run = createRun();
-    completeRun(run, 500);
-    expect(completionCount()).toBe(1);
-    resetCompletionsForTest();
-    expect(completionCount()).toBe(0);
   });
 });

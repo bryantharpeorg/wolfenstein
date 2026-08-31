@@ -1,13 +1,11 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { resolve, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-// Never downloads and never skips: split out so extending it shrinks this file (T022).
-import { resolveBrowser } from './smoke-browser.mjs';
 import { walkAndReport } from './check-no-binaries.mjs';
 import { SMOKE_FPS_FLOOR } from './smoke-floor.mjs';
 // One line per story, forever: every tools/smoke-checks/*.mjs runs, discovered.
@@ -97,6 +95,61 @@ function startServer() {
     });
     server.on('error', reject);
   });
+}
+
+// The first Chromium executable under `root`, or null. Bounded to the two levels a browser
+// cache uses -- `<root>/<build>/<platform-dir>/<exe>` -- so a wrong PLAYWRIGHT_BROWSERS_PATH
+// fails fast instead of walking a filesystem (008 T022).
+function findChromiumUnder(root) {
+  const directories = (at) => (existsSync(at)
+    ? readdirSync(at, { withFileTypes: true }).filter((e) => e.isDirectory())
+      .map((e) => resolve(at, e.name)).sort() : []);
+  for (const build of directories(root).filter((path) => /\/chromium/.test(path))) {
+    for (const directory of [build, ...directories(build)]) {
+      for (const name of ['chrome', 'chrome-headless-shell', 'headless_shell']) {
+        if (existsSync(resolve(directory, name))) return resolve(directory, name);
+      }
+    }
+  }
+  return null;
+}
+
+function resolveBrowser() {
+  const chromePath = process.env.CHROME_PATH;
+  if (chromePath) {
+    if (!existsSync(chromePath)) {
+      fail(`Missing browser: CHROME_PATH points to ${chromePath}, which does not exist.`);
+    }
+    return chromePath;
+  }
+
+  const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (browsersPath) {
+    // Discovered rather than guessed (008 T022): a cache is named for the build it holds,
+    // so literal paths are build numbers this file has to be reopened to bump, failing
+    // with "no Chromium here" beside a directory that has one. Never downloads, never skips.
+    const found = findChromiumUnder(browsersPath);
+    if (found != null) return found;
+    fail(
+      `Missing browser: PLAYWRIGHT_BROWSERS_PATH=${browsersPath} does not contain a Chromium executable.`,
+    );
+  }
+
+  // Let Playwright resolve from its default cache. If it resolves a path, verify it
+  // exists; otherwise fail with a clear message rather than attempting a download.
+  try {
+    const path = chromium.executablePath();
+    if (!existsSync(path)) {
+      fail(
+        `Missing browser: Playwright resolved ${path} but it does not exist. Set CHROME_PATH or PLAYWRIGHT_BROWSERS_PATH to a valid Chromium.`,
+      );
+    }
+    return path;
+  } catch (error) {
+    fail(
+      `Missing browser: no CHROME_PATH or PLAYWRIGHT_BROWSERS_PATH set, and Playwright cannot find a cached Chromium (${error instanceof Error ? error.message : String(error)}).`,
+    );
+  }
 }
 
 // Reads the shipped grid straight from src/level.ts so the harness recomputes
@@ -676,7 +729,7 @@ async function main() {
   const expectedCounts = recomputeCounts(levelGrid);
 
   const { server, url } = await startServer();
-  const browserPath = resolveBrowser(fail);
+  const browserPath = resolveBrowser();
   const browser = await chromium.launch({ executablePath: browserPath });
 
   try {

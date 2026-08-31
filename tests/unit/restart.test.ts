@@ -159,8 +159,7 @@ describe('the run-state snapshot (US2-S8, SC-002)', () => {
   });
 
   it('exempts the session counters, declared once for 008 to extend', () => {
-    // 008 US2 extended it, as this test's name anticipated: `run.completions` is a
-    // session counter on the same footing as the two above (008 FR-007).
+    // 008 US2 extended it, as this test's name anticipated (008 FR-007).
     expect([...RESTART_EXEMPT_FIELDS]).toEqual([
       'combat.deaths',
       'combat.restarts',

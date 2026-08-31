@@ -73,9 +73,9 @@ function strokeLines(context: Ctx, strokes: readonly GlyphStroke[], color: strin
   context.stroke();
 }
 
-/** The one text renderer: strokes from `glyphs.ts` traced into a 2D context, at the one
- *  weight every readout is drawn at. Exported because 008's stats screen draws through
- *  it rather than growing a second one beside it (US4-S1, 008 US2-S5). */
+/** The one text renderer: strokes from `glyphs.ts` traced into a 2D context. Exported
+ *  because 008's stats screen draws through it rather than growing a second one beside
+ *  it (US4-S1, 008 US2-S5). */
 export function drawGlyphText(context: Ctx, text: string, x: number, y: number, size: number, color: string): void {
   strokeLines(context, layoutText(text, x, y, size), color, Math.max(1.5, size * STROKE_WEIGHT));
 }
