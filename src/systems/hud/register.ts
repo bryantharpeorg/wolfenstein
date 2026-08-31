@@ -44,7 +44,7 @@ import {
   type FlashState,
 } from '../../hud/flash';
 import { portraitIndexForHealth } from '../../hud/portrait';
-import { createWeaponViewModel, type WeaponViewModel } from '../../hud/viewmodel';
+import { VIEWMODEL_REST, createWeaponViewModel, type WeaponViewModel } from '../../hud/viewmodel';
 
 const MILLISECONDS_PER_SECOND = 1000;
 
@@ -117,6 +117,13 @@ export interface HudHarness {
   /** Composites that actually redrew the canvas, so a change can be shown to
    *  have reached the texture rather than only the readout. */
   composites(): number;
+  /** Where the view-model is and whether its flash is drawn, plus the rest pose
+   *  it must return to, so US4-S6's "both return to rest" is a reading of the
+   *  mesh rather than of the arithmetic behind it. */
+  viewModel(): {
+    pose: { x: number; y: number; z: number; pitch: number; flashVisible: boolean };
+    rest: { x: number; y: number; z: number };
+  } | null;
 }
 
 declare global {
@@ -189,7 +196,12 @@ defineSystem({
 
     registerResettable('hud', resetHudRun);
 
-    window.__hud = { drawn: () => drawn, composites: () => composites };
+    window.__hud = {
+      drawn: () => drawn,
+      composites: () => composites,
+      viewModel: () =>
+        viewModel == null ? null : { pose: viewModel.pose(), rest: { ...VIEWMODEL_REST } },
+    };
   },
 
   update(ctx, deltaMs) {

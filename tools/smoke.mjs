@@ -28,6 +28,7 @@ import {
   readMarkers,
   rest,
   select,
+  viewModelPose,
   walkBands,
   walkTo,
 } from './smoke-loop.mjs';
@@ -901,6 +902,20 @@ async function runCombatLoopPass(browser, url, root) {
   }
   claim(typeof spawn.weapon === 'string', `__diag.combat.weapon is ${JSON.stringify(spawn.weapon)}`);
 
+  // The view-model's rest pose, which every shot below has to come back to.
+  const spawnView = await viewModelPose(page);
+  if (spawnView == null) {
+    fail('window.__hud.viewModel() is null: the weapon view-model was never built');
+    return finish();
+  }
+  const atRest = (pose) =>
+    pose.x === spawnView.rest.x && pose.y === spawnView.rest.y && pose.z === spawnView.rest.z;
+  claim(
+    atRest(spawnView.pose),
+    `the view-model starts at ${JSON.stringify(spawnView.pose)}, not its declared rest ${JSON.stringify(spawnView.rest)}`,
+  );
+  claim(spawnView.pose.flashVisible === false, 'the muzzle flash is drawn before a shot has been fired');
+
   // --- T040: fire every weapon. ---------------------------------------------
   step = 'fire every weapon';
   for (const kind of ['pistol', 'smg', 'chaingun']) {
@@ -929,11 +944,38 @@ async function runCombatLoopPass(browser, url, root) {
       `drawCalls ${shot.drawCallsWhenLit} on the frame the ${kind}'s muzzle flash was brightest, with the HUD, the view-model and the flash all rendering`,
     );
 
+    // US4-S6's other half: the view-model plays its fire motion on that frame.
+    claim(
+      shot.poseWhenLit != null && shot.poseWhenLit.pose.z > spawnView.rest.z,
+      `the ${kind}'s view-model did not kick back on the firing frame: ${JSON.stringify(shot.poseWhenLit?.pose)}`,
+    );
+    claim(
+      shot.poseWhenLit != null && shot.poseWhenLit.pose.y < spawnView.rest.y,
+      `the ${kind}'s view-model did not drop on the firing frame: ${JSON.stringify(shot.poseWhenLit?.pose)}`,
+    );
+    claim(
+      shot.poseWhenLit?.pose.flashVisible === true,
+      `the muzzle flash was not drawn on the frame the ${kind}'s shot resolved`,
+    );
+
     // US4-S7: no shot for longer than the declared decay, and the flash is out.
     const rested = await rest(page, decaySeconds * 3);
     claim(
       rested.muzzleFlash === 0,
       `muzzleFlash is ${rested.muzzleFlash} after ${(decaySeconds * 3).toFixed(2)}s with no shot, not exactly zero`,
+    );
+    // ...and so is the view-model, at exactly the pose it started from.
+    claim(
+      rested.viewModel != null && atRest(rested.viewModel.pose),
+      `the ${kind}'s view-model settled at ${JSON.stringify(rested.viewModel?.pose)}, not its declared rest ${JSON.stringify(spawnView.rest)}`,
+    );
+    claim(
+      rested.viewModel?.pose.pitch === spawnView.pose.pitch,
+      `the ${kind}'s view-model settled at pitch ${rested.viewModel?.pose.pitch}, not the ${spawnView.pose.pitch} it started at`,
+    );
+    claim(
+      rested.viewModel?.pose.flashVisible === false,
+      `the muzzle flash is still drawn ${(decaySeconds * 3).toFixed(2)}s after the ${kind}'s last shot`,
     );
   }
 

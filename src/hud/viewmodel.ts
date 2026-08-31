@@ -153,6 +153,10 @@ export interface WeaponViewModel {
   setKind(kind: WeaponKind): void;
   /** Places the model and the flash for this frame's intensity. Zero is rest. */
   setFireMotion(intensity: number): void;
+  /** Where the model actually is. A reading, not a control: the harness asserts
+   *  the fire motion happened and returned to rest, which it cannot do against a
+   *  mesh it has no way to look at (US4-S6). */
+  pose(): { x: number; y: number; z: number; pitch: number; flashVisible: boolean };
   dispose(): void;
 }
 
@@ -233,6 +237,16 @@ export function createWeaponViewModel(kind: WeaponKind = WEAPON_KINDS[0]!): Weap
       // A fixed cant, not a random one: the flash must look the same on every
       // run for the same reason the portraits must.
       flash.rotation.z = REST_YAW;
+    },
+
+    pose() {
+      return {
+        x: object.position.x,
+        y: object.position.y,
+        z: object.position.z,
+        pitch: object.rotation.x,
+        flashVisible: flash.visible,
+      };
     },
 
     dispose(): void {

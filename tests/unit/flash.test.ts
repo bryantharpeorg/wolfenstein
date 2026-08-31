@@ -9,6 +9,9 @@
 // accumulated over a hundred frames cannot leave a flash faintly alight forever.
 
 import { describe, expect, it } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, relative } from 'node:path';
 import {
   MUZZLE_FLASH_DECAY_SECONDS,
   VIEWMODEL_FIRE_MOTION,
@@ -169,5 +172,74 @@ describe('the view-model fire motion rides the same clock', () => {
     }
     // Above one is clamped rather than extrapolated.
     expect(fireMotion(4)).toEqual(fireMotion(1));
+  });
+});
+
+// FR-017's last clause and US4-S8: "the view-model MUST NOT be the origin of any
+// ray". That is a structural claim, so it is asserted structurally rather than by
+// firing a shot and hoping the number that comes back would have been different.
+// Two halves: nothing under `src/hud/` can reach the shot path, and the shot path
+// reaches the camera in exactly one place.
+
+const SRC = fileURLToPath(new URL('../../src/', import.meta.url));
+
+function tsFilesUnder(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...tsFilesUnder(path));
+    else if (entry.name.endsWith('.ts')) found.push(path);
+  }
+  return found;
+}
+
+const presentation = (): { path: string; text: string }[] =>
+  tsFilesUnder(SRC)
+    .filter((path) => {
+      const where = relative(SRC, path);
+      return where.startsWith('hud/') || where.startsWith('systems/hud/');
+    })
+    .map((path) => ({ path: relative(SRC, path), text: readFileSync(path, 'utf8') }));
+
+describe('the view-model is never the origin of a ray (FR-017, US4-S8)', () => {
+  it('finds the presentation modules to check, so the scan is not vacuous', () => {
+    const files = presentation().map((file) => file.path);
+    expect(files).toContain('hud/viewmodel.ts');
+    expect(files).toContain('systems/hud/register.ts');
+  });
+
+  it('reaches nothing that traces, aims or gates a shot', () => {
+    const forbidden = /from\s+['"][^'"]*\/(hitscan|spread|fire-control)['"]/;
+    for (const file of presentation()) {
+      expect(forbidden.test(file.text), `${file.path} imports part of the shot path`).toBe(false);
+    }
+  });
+
+  it('never asks the camera which way it is pointing', () => {
+    // The HUD parents its quad and the view-model to the camera, which is a
+    // scene-graph fact. Reading the camera's *direction* is the thing a ray
+    // origin would do, and nothing here does it.
+    for (const file of presentation()) {
+      expect(
+        /getWorldDirection|getWorldPosition/.test(file.text),
+        `${file.path} reads the camera's world pose`,
+      ).toBe(false);
+    }
+  });
+
+  it('leaves the trace in the combat system, from the camera, and nowhere else', () => {
+    const callers = tsFilesUnder(SRC)
+      .filter((path) => /\btraceShot\s*\(/.test(readFileSync(path, 'utf8')))
+      .map((path) => relative(SRC, path))
+      .sort();
+    expect(callers).toEqual(['combat/hitscan.ts', 'systems/combat/register.ts']);
+
+    const combatSystem = readFileSync(join(SRC, 'systems/combat/register.ts'), 'utf8');
+    expect(combatSystem).toMatch(/camera\.getWorldPosition/);
+    expect(combatSystem).toMatch(/camera\.getWorldDirection/);
+    // And it does not reach the view-model to find out where to shoot from.
+    expect(/from\s+['"][^'"]*\/(viewmodel|compose|flash|portrait|glyphs)['"]/.test(combatSystem)).toBe(
+      false,
+    );
   });
 });

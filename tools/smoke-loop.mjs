@@ -106,6 +106,7 @@ export function installLoopDrive(page) {
         let peakFlash = 0;
         let drawCallsWhenLit = 0;
         let peakDrawCalls = 0;
+        let poseWhenLit = null;
         let fired = false;
         let settled = 0;
 
@@ -117,6 +118,7 @@ export function installLoopDrive(page) {
           if (flash > peakFlash) {
             peakFlash = flash;
             drawCallsWhenLit = window.__diag.drawCalls;
+            poseWhenLit = window.__hud.viewModel();
           }
           if (!fired && combat().shotsFired > before.shots) fired = true;
           // A few frames past the shot, so the peak is not missed by one frame.
@@ -130,6 +132,7 @@ export function installLoopDrive(page) {
           peakFlash,
           drawCallsWhenLit,
           peakDrawCalls,
+          poseWhenLit,
           after: { shots: combat().shotsFired, ammo: { ...combat().ammo }, weapon: combat().weapon },
         };
       },
@@ -179,7 +182,11 @@ export function installLoopDrive(page) {
       async rest(seconds) {
         const until = performance.now() + seconds * 1000;
         while (performance.now() < until) await frame();
-        return { muzzleFlash: combat().muzzleFlash, shots: combat().shotsFired };
+        return {
+          muzzleFlash: combat().muzzleFlash,
+          shots: combat().shotsFired,
+          viewModel: window.__hud.viewModel(),
+        };
       },
 
       /**
@@ -302,6 +309,8 @@ export const killOne = (page, guards, burstFrames = 5, holdFrames = 120) =>
     ([count, burst, hold]) => window.__smokeLoop.killOne(count, burst, hold),
     [guards, burstFrames, holdFrames],
   );
+
+export const viewModelPose = (page) => page.evaluate(() => window.__hud.viewModel());
 
 export const hudWithinOneFrame = (page, damage = 0) =>
   page.evaluate((amount) => window.__smokeLoop.hudWithinOneFrame(amount), damage);
