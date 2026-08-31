@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { emitFaces } from '../../src/geometry/faces';
+import { LEVEL_GRID } from '../../src/level';
 import {
   UV_AGREEMENT_EPSILON,
   UV_REPEATS_PER_TILE,
@@ -194,5 +195,122 @@ describe('computeTileUVs itself', () => {
 
   it('rejects a normal array that does not match the positions', () => {
     expect(() => computeTileUVs(new Float32Array(9), new Float32Array(6))).toThrow();
+  });
+});
+
+// The same two claims, made against the level that actually ships rather than a
+// three-row fixture: a merged run of N of its tiles spans N UV units (US3-S5),
+// and every corner in it agrees within the declared epsilon (US3-S6).
+
+describe('the shipped level', () => {
+  const faces = emitFaces(LEVEL_GRID);
+
+  it('spans N UV units across a merged run of N of its own tiles', () => {
+    const wall = faces.walls['1']!;
+    const uvs = computeTileUVs(wall.positions, wall.normals);
+
+    // The north border's south face: row 0 tiles with open floor at row 1, taken
+    // up to the first break, which is the run 002's emitter merges into one group.
+    const run: number[] = [];
+    for (let x = 0; x < LEVEL_GRID[0]!.length; x += 1) {
+      const solid = LEVEL_GRID[0]![x] === '1' && LEVEL_GRID[1]![x] === '0';
+      if (solid) run.push(x);
+      else if (run.length > 0) break;
+    }
+    expect(run.length).toBeGreaterThan(10);
+
+    const from = run[0]!;
+    const to = run[run.length - 1]! + 1;
+    let minU = Infinity;
+    let maxU = -Infinity;
+    let vertices = 0;
+    for (let vertex = 0; vertex * 3 < wall.positions.length; vertex += 1) {
+      const x = wall.positions[vertex * 3]!;
+      const z = wall.positions[vertex * 3 + 2]!;
+      if (wall.normals[vertex * 3 + 2]! < 0.5) continue;
+      if (z !== 1 || x < from || x > to) continue;
+      const [u] = uvAt(uvs, vertex);
+      minU = Math.min(minU, u);
+      maxU = Math.max(maxU, u);
+      vertices += 1;
+    }
+    expect(vertices).toBe(run.length * 4);
+    expect(maxU - minU).toBeCloseTo(run.length * UV_REPEATS_PER_TILE, 6);
+  });
+
+  it.each(Object.keys(faces.walls))(
+    'stretches no face of wall group %s: one repeat per tile edge, everywhere',
+    (type: string) => {
+      const wall = faces.walls[type]!;
+      const uvs = computeTileUVs(wall.positions, wall.normals);
+      const quads = wall.positions.length / 3 / 4;
+      expect(quads).toBeGreaterThan(0);
+      for (let quad = 0; quad < quads; quad += 1) {
+        const bounds = boundsOf(
+          uvs,
+          [0, 1, 2, 3].map((corner) => quad * 4 + corner),
+        );
+        expect(bounds.maxU - bounds.minU).toBeCloseTo(UV_REPEATS_PER_TILE, 6);
+        expect(bounds.maxV - bounds.minV).toBeCloseTo(2 * UV_REPEATS_PER_TILE, 6);
+      }
+    },
+  );
+
+  it('agrees at every corner in the level, within the declared epsilon', () => {
+    // A door or a secret tile is isolated — two parallel faces and no shared
+    // edge — so the corners all live in the wall groups. They are counted across
+    // the whole level so the assertion cannot pass by finding none.
+    let corners = 0;
+    const disagreements: string[] = [];
+
+    for (const [type, wall] of Object.entries(faces.walls)) {
+      const uvs = computeTileUVs(wall.positions, wall.normals);
+
+      const byPosition = new Map<string, number[]>();
+      for (let vertex = 0; vertex * 3 < wall.positions.length; vertex += 1) {
+        const key = `${wall.positions[vertex * 3]},${wall.positions[vertex * 3 + 1]},${
+          wall.positions[vertex * 3 + 2]
+        }`;
+        const list = byPosition.get(key);
+        if (list == null) byPosition.set(key, [vertex]);
+        else list.push(vertex);
+      }
+
+      for (const [key, vertices] of byPosition) {
+        for (let i = 0; i < vertices.length; i += 1) {
+          for (let j = i + 1; j < vertices.length; j += 1) {
+            const a = vertices[i]!;
+            const b = vertices[j]!;
+            const sameNormal = [0, 1, 2].every(
+              (axis) => Math.abs(wall.normals[a * 3 + axis]! - wall.normals[b * 3 + axis]!) < 1e-6,
+            );
+            if (sameNormal) continue;
+            corners += 1;
+            if (!uvsAgreeAtEdge(uvAt(uvs, a), uvAt(uvs, b))) {
+              disagreements.push(`wall ${type} at ${key}: ${uvAt(uvs, a)} vs ${uvAt(uvs, b)}`);
+            }
+          }
+        }
+      }
+    }
+
+    expect(disagreements).toEqual([]);
+    expect(corners).toBeGreaterThan(0);
+  });
+
+  it('tiles the floor and the ceiling once per tile in both axes', () => {
+    for (const plane of [faces.floor, faces.ceiling]) {
+      const uvs = computeTileUVs(plane.positions, plane.normals);
+      const quads = plane.positions.length / 3 / 4;
+      expect(quads).toBeGreaterThan(0);
+      for (let quad = 0; quad < quads; quad += 1) {
+        const bounds = boundsOf(
+          uvs,
+          [0, 1, 2, 3].map((corner) => quad * 4 + corner),
+        );
+        expect(bounds.maxU - bounds.minU).toBeCloseTo(UV_REPEATS_PER_TILE, 6);
+        expect(bounds.maxV - bounds.minV).toBeCloseTo(UV_REPEATS_PER_TILE, 6);
+      }
+    }
   });
 });
