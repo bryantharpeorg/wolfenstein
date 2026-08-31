@@ -1,11 +1,6 @@
 // The guard record: what a guard *is*, separately from what a tick *does* to it.
-// Pure: no DOM, no three.js (FR-001).
-//
-// This module exists because `step.ts` reached the constitution's 400-line
-// ceiling (Article IV). The split is on the seam the code already had — data and
-// its constructors here, the tick and the state behaviour there — so `step.ts`
-// still declares the `GuardWorld` port it is the point of, and still imports no
-// pathfinder and no raycast.
+// Pure: no DOM, no three.js (FR-001). Split out of `step.ts` at the 400-line
+// ceiling (Article IV), on the seam the code already had.
 
 import { GUARD_MAX_HEALTH, GUARD_SPAWN_STATE } from './states';
 import type { GuardState } from './states';
@@ -17,41 +12,39 @@ export interface Cell {
 }
 
 /** A continuous position on the grid, in cell units. */
-export interface Point {
-  readonly x: number;
-  readonly z: number;
-}
+export type Point = Cell;
 
+/**
+ * A guard, as a value. `x`/`z` are cell units (a guard stands at a centre, 4.5);
+ * `facing` is a yaw, 0 looking down -Z; `tick` is the tick last stepped to, -1
+ * before the first; `pendingShot` is a shot wound up and not yet released,
+ * cancelled by death; `pathGoal` is the cell the path was asked for, so a change
+ * discards it; `pathable` goes false on an unreachable request (FR-011); and
+ * `randomConsumed` marks the ticks where the seed can matter at all (US1-S9).
+ */
 export interface Guard {
   readonly id: string;
   readonly state: GuardState;
-  /** Position in cell units; a guard stands at a cell's centre, e.g. 4.5. */
   readonly x: number;
   readonly z: number;
-  /** Facing yaw in radians, three.js convention: at 0 the guard faces -Z. */
   readonly facing: number;
   readonly health: number;
-  /** The tick this record was last stepped to; -1 before the first step. */
   readonly tick: number;
   readonly stateEnteredTick: number;
   readonly ticksInState: number;
-  /** The heading the idle patrol script is currently turning toward. */
+  /** The heading the idle patrol turns toward. */
   readonly patrolHeading: number;
   /** The last cell the player was seen in, or null if never seen (US1-S3). */
   readonly lastKnownPlayer: Cell | null;
   readonly lastKnownTick: number;
   readonly cooldownTicks: number;
   readonly windupTicks: number;
-  /** Whether a shot is wound up and not yet released; cancelled by death. */
   readonly pendingShot: boolean;
   readonly shotsFired: number;
   readonly path: readonly Cell[];
-  /** The cell the current path was asked for; a change discards the path. */
   readonly pathGoal: Cell | null;
   readonly pathRequestTick: number;
-  /** False once a path request came back unreachable (Edge Cases, FR-011). */
   readonly pathable: boolean;
-  /** Whether this step drew from the PRNG — the seed only matters where true. */
   readonly randomConsumed: boolean;
 }
 
@@ -98,10 +91,9 @@ export function traceGuard(guard: Guard): string {
   );
 }
 
-/** Applies damage without transitioning: the table alone decides state (US1-S7).
+/** Applies damage without transitioning — the table alone decides state (US1-S7).
  *  A guard already in `death` absorbs nothing, so no second death can fire. */
 export function damageGuard(guard: Guard, amount: number): Guard {
   if (guard.state === 'death') return guard;
   return { ...guard, health: Math.max(0, guard.health - amount) };
 }
-
