@@ -39,6 +39,12 @@ let field: SecretField | null = null;
 let interaction: InteractionDiagnostics | null = null;
 const blocks = new Map<Secret, Mesh>();
 
+/** The live secrets, or null before setup. 007's restart returns every one to
+ *  unfound through this (007 FR-011). */
+export function getSecretField(): SecretField | null {
+  return field;
+}
+
 function blockPosition(secret: Secret): { x: number; z: number } {
   const offset = secretOffset(secret);
   return {

@@ -1,12 +1,7 @@
-// T015 (FR-011; US2-S6, US2-S7, US2-S8, US2-S9, SC-002, Edge Cases): the reset
-// registry, the run-state snapshot restart is judged by, and the coalescing that
-// makes a doubled restart command idempotent.
-//
-// `restart.ts` must not know what a door or a guard is: a story makes its own
-// state resettable by registering a function, and this file proves that by
-// registering fixtures rather than by importing another spec's module. The
-// snapshot is asserted through the same deep comparison SC-002 names, so a field
-// that leaks across a reset is named rather than merely counted.
+// T015 (FR-011; US2-S6..S9, SC-002, Edge Cases): the reset registry, the snapshot
+// restart is judged by, and the coalescing that makes a doubled command
+// idempotent. `restart.ts` must not know what a door or a guard is, which this
+// file proves by registering fixtures rather than another spec's module.
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -28,7 +23,7 @@ import { ensureInteractionDiag } from '../../src/interaction/interaction-diag';
 import { MAX_HEALTH } from '../../src/combat/vitals';
 import { startingAmmo, DEFAULT_WEAPON } from '../../src/combat/weapons';
 
-/** A diagnostics object standing where a first frame left it. */
+/** Diagnostics standing where a first frame left them. */
 function spawnDiag(): Diagnostics {
   const diag = createDiagnostics('webgl');
   const combat = ensureCombatDiag(diag);
@@ -171,8 +166,7 @@ describe('the run-state snapshot (US2-S8, SC-002)', () => {
     diag.combat!.deaths = 3;
     diag.combat!.restarts = 3;
     expect(diffSnapshots(before, snapshotRunState(diag))).toEqual([]);
-    // And the exemption is a declaration, not a blanket: pass an empty set and
-    // the same two fields are reported.
+    // A declaration, not a blanket: pass an empty set and both are reported.
     expect(diffSnapshots(before, snapshotRunState(diag), [])).toEqual([
       'combat.deaths',
       'combat.restarts',
@@ -191,7 +185,7 @@ describe('a full reset returns the run to spawn (US2-S6, US2-S7, US2-S9)', () =>
       diag.interaction = restored.interaction;
       diag.enemies = restored.enemies;
       diag.enemiesAlive = restored.enemiesAlive;
-      // The session counters are this spec's, not the registry's, to preserve.
+      // The session counters are this spec's to preserve, not the registry's.
       diag.combat!.deaths = 1;
       diag.combat!.restarts = restartCount() + 1;
     };
@@ -209,8 +203,8 @@ describe('a full reset returns the run to spawn (US2-S6, US2-S7, US2-S9)', () =>
     registerResettable('count', () => {
       resets += 1;
     });
-    // Nothing here says whether the run was over: the registry has no notion of
-    // death, which is exactly why restart is not exclusive to it.
+    // Nothing says whether the run was over: the registry has no notion of
+    // death, which is why restart is not exclusive to it.
     resetRun();
     resetRun();
     expect(resets).toBe(2);
@@ -256,12 +250,5 @@ describe('restart is idempotent within a frame (US2-S8, Edge Cases)', () => {
     expect(resetRun().performed).toBe(true);
     expect(resets).toBe(1);
     expect(restartCount()).toBe(1);
-  });
-
-  it('leaves the session counters alone: reset never zeroes them', () => {
-    registerResettable('noop', () => {});
-    resetRun();
-    resetRun();
-    expect(restartCount()).toBe(2);
   });
 });

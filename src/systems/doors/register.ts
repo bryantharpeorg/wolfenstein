@@ -28,6 +28,12 @@ let field: DoorField | null = null;
 let interaction: InteractionDiagnostics | null = null;
 const leaves = new Map<Door, Mesh>();
 
+/** The live doors, or null before setup. 007's restart shuts every one through
+ *  this (007 FR-011); the reset itself is that spec's. */
+export function getDoorField(): DoorField | null {
+  return field;
+}
+
 function readPlayer(ctx: GameContext): PlayerCapsule | null {
   const player = ctx.diag.player;
   return player == null ? null : { x: player.x, z: player.z, radius: COLLIDER_RADIUS };

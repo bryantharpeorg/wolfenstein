@@ -6,6 +6,7 @@
 // 001 and 002 own (FR-011, FR-012, FR-014, US3-S1..S4).
 
 import { defineSystem } from '../../boot/registry';
+import { commandsResolve } from '../../combat/run-state';
 import { getPlayerState } from '../../player/state';
 import { ensurePlayerDiag, type PlayerDiagnostics } from '../../player/diag-player';
 import { computeDesiredVelocity } from '../../player/locomotion';
@@ -30,6 +31,19 @@ defineSystem({
     if (adapter == null || playerDiag == null) return;
 
     const state = getPlayerState();
+
+    // The one gate every player command consults (007 FR-010): movement stops
+    // resolving on death, and a key held across it does not bank frames.
+    if (!commandsResolve()) {
+      state.desiredVelX = 0;
+      state.desiredVelZ = 0;
+      state.sprinting = false;
+      state.speed = 0;
+      playerDiag.speed = 0;
+      playerDiag.sprinting = false;
+      return;
+    }
+
     const vel = computeDesiredVelocity(adapter.keys, state.yaw);
     state.desiredVelX = vel.x;
     state.desiredVelZ = vel.z;

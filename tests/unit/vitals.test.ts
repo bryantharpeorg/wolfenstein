@@ -1,11 +1,9 @@
-// T014 (FR-009, FR-010, FR-012; US2-S1, US2-S2, US2-S3, US2-S5, US2-S10): the
-// player's health, the one-way death transition, and the score accumulator.
-//
-// Two of these properties are about what the code may *not* do. The starting
-// maximum must be declared in exactly one place, so the source tree is scanned
-// for a second declaration. And the damage a guard deals must be 006's
-// falloff-computed number applied unchanged, so the shots below are resolved by
-// `src/enemy/attack.ts` rather than by a literal written here.
+// T014 (FR-009, FR-010, FR-012; US2-S1, S2, S3, S5, S10): health, the one-way
+// death transition, and the score accumulator. Two properties are about what the
+// code may *not* do: the starting maximum must be declared in exactly one place,
+// so the source tree is scanned for a second declaration; and a guard's damage
+// must be 006's falloff number applied unchanged, so the shots below are resolved
+// by `src/enemy/attack.ts` rather than by a literal written here.
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -36,8 +34,8 @@ import { NO_OPEN_TILES, draw, roomDraft } from './enemy-grid';
 
 const SRC = fileURLToPath(new URL('../../src/', import.meta.url));
 
-/** Every `.ts` file under `src/`, so a second declaration cannot hide in a
- *  directory this test did not think to name. */
+/** Every `.ts` under `src/`, so a second declaration cannot hide in a directory
+ *  this test did not think to name. */
 function sourceFiles(dir = SRC): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -50,13 +48,13 @@ function sourceFiles(dir = SRC): string[] {
 
 const ROOM = draw(roomDraft(24, 24));
 
-/** A guard standing at the centre of cell (x, z), already committed to a shot. */
+/** A guard at the centre of cell (x, z), already committed to a shot. */
 function firing(id: string, x: number, z: number): Guard {
   return { ...createGuard({ id, x: x + 0.5, z: z + 0.5 }), state: 'attack' };
 }
 
-/** One guard shot resolved against the player by 006's attack module, whose
- *  damage this spec applies rather than recomputes (Assumptions). */
+/** One shot resolved by 006's attack module, whose damage this spec applies
+ *  rather than recomputes (Assumptions). */
 function guardShotDamage(guardX: number, playerX: number): number {
   const shot = resolveShot(firing('g', guardX, 2), { x: playerX + 0.5, z: 2.5 }, ROOM, NO_OPEN_TILES);
   expect(shot).not.toBeNull();
@@ -110,7 +108,7 @@ describe('a guard shot takes exactly its falloff damage (FR-009, US2-S2)', () =>
     const report = applyDamage(vitals, MAX_HEALTH * 10);
     expect(vitals.health).toBe(MIN_HEALTH);
     expect(vitals.health).toBeGreaterThanOrEqual(0);
-    // Only the health that existed is spent: the overkill is not "applied".
+    // Only the health that existed is spent; the overkill is not "applied".
     expect(report.applied).toBe(MAX_HEALTH);
     expect(report.died).toBe(true);
   });

@@ -35,6 +35,20 @@ let pickups: KeyPickup[] = [];
 let interaction: InteractionDiagnostics | null = null;
 const meshes = new Map<KeyPickup, Mesh>();
 
+/** The handle 007's restart empties the inventory and puts the keys back on the
+ *  floor through (007 FR-011); the reset itself is that spec's, not this
+ *  file's. */
+export interface KeyRunState {
+  readonly inventory: KeyInventory;
+  readonly pickups: readonly KeyPickup[];
+  readonly meshes: ReadonlyMap<KeyPickup, Mesh>;
+  readonly publish: () => void;
+}
+
+export function getKeyRunState(): KeyRunState {
+  return { inventory, pickups, meshes, publish: publishKeys };
+}
+
 // The kind the lock gate last refused for. The doors system records *that* a
 // command was refused; naming the key is this story's business, so the kind is
 // carried from the gate to the next frame's diagnostics write (US2-S8).
@@ -81,12 +95,9 @@ function collectAtPlayer(ctx: GameContext): void {
   if (!collected) return;
 
   // The pickup is consumed, so its mesh goes with it; re-entering the tile yields
-  // nothing, which is what `consumed` means (FR-008, US2-S2).
-  for (const [pickup, mesh] of meshes) {
-    if (!pickup.consumed) continue;
-    ctx.scene.remove(mesh);
-    meshes.delete(pickup);
-  }
+  // nothing, which is what `consumed` means (FR-008, US2-S2). Hidden rather than
+  // removed, so 007's restart can put it back; an invisible mesh draws nothing.
+  for (const [pickup, mesh] of meshes) mesh.visible = !pickup.consumed;
   publishKeys();
 }
 
