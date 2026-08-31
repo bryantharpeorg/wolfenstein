@@ -22,6 +22,9 @@ export const GUARD_SPAWN_STATE: GuardState = 'idle';
 // never chases literals across files (the arrangement `interaction/params.ts`
 // established). The spec fixes relationships, not values (Assumptions).
 
+/** A guard's health at spawn. Damage at or past this puts it in `death`. */
+export const GUARD_MAX_HEALTH = 100;
+
 /** Ticks a guard spends in `alert` before it commits to the chase (US1-S4). */
 export const ALERT_DURATION_TICKS = 12;
 
