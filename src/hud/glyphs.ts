@@ -54,6 +54,11 @@ const STROKE_SOURCE: Readonly<Record<string, string>> = {
   8: '130201103041423313|1304051636454433',
   9: '0516364541301001021343',
   ':': '2122|2425',
+  // 008 US2's stats screen spells ratios, percentages and the zero-denominator
+  // placeholder; they join the one table rather than a second renderer (008 US2-S5).
+  '/': '0630',
+  '%': '0630|0010110100|3545463635',
+  '-': '0323',
 };
 
 function decode(source: string): Glyph {

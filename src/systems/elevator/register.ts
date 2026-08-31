@@ -33,9 +33,13 @@ import {
   setRunDead,
   stepRun,
   type RunTimeline,
+  type RunTransition,
 } from '../../run/state';
 
 let run: RunTimeline | null = null;
+// The transition this frame's `stepRun` returned, held rather than announced: the machine
+// returns it precisely so a later story can observe `complete` (008 FR-007).
+let lastTransition: RunTransition | null = null;
 let interaction: InteractionDiagnostics | null = null;
 let combat: CombatDiagnostics | null = null;
 
@@ -45,10 +49,18 @@ export function getRunTimeline(): RunTimeline | null {
   return run;
 }
 
+/** This frame's transition, or null. Read by the stats-screen system, which runs after
+ *  this one, so a `complete` arrival is seen on the frame it happened, exactly once. */
+export function getLastRunTransition(): RunTransition | null {
+  return lastTransition;
+}
+
 /** 007's restart (FR-011), applied to this spec's run: back to `playing` with the
  *  elevator closed and the travel that was pending discarded (Edge Cases). */
 export function resetElevatorRun(): void {
   if (run != null) resetRunTimeline(run);
+  // A transition from the run that just ended is not the new run's to report.
+  lastTransition = null;
 }
 
 function playerPosition(ctx: GameContext): { x: number; z: number } {
@@ -104,6 +116,6 @@ defineSystem({
     setRunDead(run, combat?.dead === true);
     // The frame delta, unclamped: the run timer is wall-clock (FR-004), and the
     // travel splits a delta at its arrival rather than skipping past it.
-    stepRun(run, deltaMs);
+    lastTransition = stepRun(run, deltaMs);
   },
 });

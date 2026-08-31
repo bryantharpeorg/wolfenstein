@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -97,6 +97,23 @@ function startServer() {
   });
 }
 
+// The first Chromium executable under `root`, or null. Bounded to the two levels a browser
+// cache uses -- `<root>/<build>/<platform-dir>/<exe>` -- so a wrong PLAYWRIGHT_BROWSERS_PATH
+// fails fast instead of walking a filesystem (008 T022).
+function findChromiumUnder(root) {
+  const directories = (at) => (existsSync(at)
+    ? readdirSync(at, { withFileTypes: true }).filter((e) => e.isDirectory())
+      .map((e) => resolve(at, e.name)).sort() : []);
+  for (const build of directories(root).filter((path) => /\/chromium/.test(path))) {
+    for (const directory of [build, ...directories(build)]) {
+      for (const name of ['chrome', 'chrome-headless-shell', 'headless_shell']) {
+        if (existsSync(resolve(directory, name))) return resolve(directory, name);
+      }
+    }
+  }
+  return null;
+}
+
 function resolveBrowser() {
   const chromePath = process.env.CHROME_PATH;
   if (chromePath) {
@@ -108,18 +125,11 @@ function resolveBrowser() {
 
   const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
   if (browsersPath) {
-    // Try the real Chromium layout used by installed browser caches.
-    const candidates = [
-      resolve(browsersPath, 'chromium-1234', 'chrome-linux64', 'chrome'),
-      resolve(browsersPath, 'chromium', 'chrome-linux', 'chrome'),
-      resolve(browsersPath, 'chromium_headless_shell-1234', 'chrome-headless-shell-linux64', 'chrome-headless-shell'),
-      resolve(browsersPath, 'chromium-HEADLESS-shell', 'chrome-linux', 'chrome'),
-    ];
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        return candidate;
-      }
-    }
+    // Discovered rather than guessed (008 T022): a cache is named for the build it holds,
+    // so literal paths are build numbers this file has to be reopened to bump, failing
+    // with "no Chromium here" beside a directory that has one. Never downloads, never skips.
+    const found = findChromiumUnder(browsersPath);
+    if (found != null) return found;
     fail(
       `Missing browser: PLAYWRIGHT_BROWSERS_PATH=${browsersPath} does not contain a Chromium executable.`,
     );

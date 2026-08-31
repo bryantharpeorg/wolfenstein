@@ -14,6 +14,10 @@ export type Resettable = () => void;
 export const RESTART_EXEMPT_FIELDS: readonly string[] = [
   'combat.deaths',
   'combat.restarts',
+  // 008 US2's completion counter: a session counter like the two above, and nobody's to
+  // clear (008 FR-007, US2-S6). Declared rather than left out, so the exemption is a
+  // statement — `src/run/completions.ts` keeps it out of the reset registry entirely.
+  'run.completions',
   // Not a `__diag` field yet: the harness measures elapsed wall-clock itself.
   'elapsedMs',
 ];

@@ -159,7 +159,13 @@ describe('the run-state snapshot (US2-S8, SC-002)', () => {
   });
 
   it('exempts the session counters, declared once for 008 to extend', () => {
-    expect([...RESTART_EXEMPT_FIELDS]).toEqual(['combat.deaths', 'combat.restarts', 'elapsedMs']);
+    // 008 US2 extended it, as this test's name anticipated (008 FR-007).
+    expect([...RESTART_EXEMPT_FIELDS]).toEqual([
+      'combat.deaths',
+      'combat.restarts',
+      'run.completions',
+      'elapsedMs',
+    ]);
 
     const diag = spawnDiag();
     const before = snapshotRunState(diag);
