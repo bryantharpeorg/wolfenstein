@@ -158,6 +158,25 @@ export default async function check({ page, root }) {
     );
   }
 
+  // US3-S11: generating five 512px materials and deriving their maps is a third
+  // of a second, and `__diag.fps` is a trailing window read the moment the loop
+  // reports ready — spent on the main thread it is read as the frame rate, and
+  // was, at 4.6 against a floor of 5. It is spent on a worker instead. A platform
+  // with no worker is a declared degradation; the browser this gate drives has one.
+  const hasWorker = await page.evaluate(() => typeof Worker !== 'undefined');
+  if (hasWorker && first.probe.generatedOffThread !== true) {
+    errors.push(
+      'the materials were generated on the main thread though the platform has ' +
+        'workers: the load is being charged to the frame rate (US3-S11)',
+    );
+  }
+  if (!(first.diag.generatedMs > 0)) {
+    errors.push(
+      `__diag.materials.generatedMs is ${first.diag.generatedMs}: whichever thread ` +
+        'generated, what it cost has to reach the page (FR-004)',
+    );
+  }
+
   // US3-S10 / FR-011: mipmaps, repeat wrapping and the declared anisotropy are
   // in effect on the textures the page uploaded, not merely asked for.
   if (!first.probe.allMipmapped) errors.push('an uploaded texture is not mipmapped (US3-S10)');

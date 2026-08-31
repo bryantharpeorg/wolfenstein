@@ -9,9 +9,11 @@
  * lent the default's maps so it is lit like the level (FR-008). Unlit meshes are
  * left alone: 006's billboards and 007's HUD carry their own sprite sheets.
  *
- * Skinning takes one step per frame (US3-S11): five materials generated inside
- * `setup` is a third of a second no animation frame can be serviced in, which the
- * harness read as 4.6 fps against a floor of 5.
+ * Skinning costs frames, and US3-S11 is the budget clause of the story's own
+ * title. Generation and derivation happen on a worker (`generation.ts`), so the
+ * expensive third of a second lands on no animation frame at all; what is left —
+ * one upload, then the attach — is drained one step per frame, because the maps
+ * arrive faster than a software renderer can take them.
  */
 import {
   BufferAttribute,
@@ -29,10 +31,11 @@ import { LEVEL_GRID } from '../../level';
 import { DEFAULT_MATERIAL, bindSurface, classifySurface } from '../../materials/bindings';
 import {
   attachMaterialDiagnostics,
-  publishMaterialDiagnostics,
   type MaterialMapReport,
+  publishMaterialDiagnostics,
+  recordFallback,
 } from '../../materials/diagnostics';
-import { generateAlbedo, generationStats } from '../../materials/generate';
+import { generationStats } from '../../materials/generate';
 import { buildMaterialMaps, type MaterialMapSet } from '../../materials/maps';
 import { MATERIAL_NAMES, type MaterialName } from '../../materials/table';
 import {
@@ -43,6 +46,7 @@ import {
   textureCacheStats,
 } from '../../materials/texture-adapter';
 import { computeTileUVs } from '../../materials/uv';
+import { type GeneratedMaps, type GenerationRun, startGeneration } from './generation';
 
 /** What the harness reads back (US3-S8, US3-S9). The counts are paired: an
  * untextured zero is worth something only against the meshes walked. */
@@ -52,6 +56,8 @@ export interface MaterialsProbe {
   readonly albedoTextures: number;
   readonly textures: number;
   readonly pending: number;
+  /** Whether the five materials were generated off the main thread (US3-S11). */
+  readonly generatedOffThread: boolean;
   readonly byMaterial: Readonly<Record<string, number>>;
   /** Read off the uploaded textures, not the constant that asked for them. */
   readonly minAnisotropy: number;
@@ -79,7 +85,16 @@ const reports: MaterialMapReport[] = [];
 
 /** One frame's worth of skinning; the queue drains one step per frame. */
 type SkinStep = (ctx: GameContext) => void;
-let steps: SkinStep[] = [];
+const steps: SkinStep[] = [];
+
+/** Materials not yet generated, so `pending` counts the work left rather than
+ * only the work already delivered, and a dead worker knows what to finish. */
+const ungenerated = new Set<MaterialName>();
+
+/** The worker's own accumulated generation time (FR-004): `generationStats()`
+ * on this thread stays at zero while the other thread does the generating. */
+let offThreadGeneratedMs = 0;
+let generation: GenerationRun = { offThread: false, stop() {} };
 
 function isStandardMaterial(material: Material): material is MeshStandardMaterial {
   return (material as MeshStandardMaterial).isMeshStandardMaterial === true;
@@ -148,7 +163,7 @@ function planBindings(scene: Object3D, camera: Camera): void {
   }
   // Every declared material is built, so `textureCount` lands on one set per
   // material whatever the shipped level happens to use.
-  steps = MATERIAL_NAMES.flatMap((name) => materialSteps(name));
+  for (const name of MATERIAL_NAMES) ungenerated.add(name);
 }
 
 /** Uploads one map and waits for the renderer to have done it: a WebGL call only
@@ -171,22 +186,14 @@ function uploadMap(ctx: GameContext, set: MaterialMapSet, kind: MapKind): void {
   }
 }
 
-/** One material in steps: generation, derivation, one per map upload, then the
- * meshes — so nothing is drawn with a map not yet uploaded. */
-function materialSteps(name: MaterialName): SkinStep[] {
-  let set: MaterialMapSet | null = null;
+/** What a finished material still costs a frame: one upload apiece — a WebGL
+ * call only queues work, so the read-back keeps all fifteen mip chains off one
+ * frame — then the attach, so nothing is drawn with a map not yet uploaded. */
+function skinSteps(set: MaterialMapSet): SkinStep[] {
+  const name = set.name;
   return [
-    // US1's memo means the derivation below re-reads this (FR-004).
-    () => void generateAlbedo(name),
+    ...MAP_KINDS.map((kind) => (ctx: GameContext) => uploadMap(ctx, set, kind)),
     () => {
-      set = buildMaterialMaps(name);
-      reports.push({ name, hasNormal: set.hasNormal, hasRoughness: set.hasRoughness });
-    },
-    ...MAP_KINDS.map((kind) => (ctx: GameContext) => {
-      if (set != null) uploadMap(ctx, set, kind);
-    }),
-    () => {
-      if (set == null) return;
       const material = sharedMaterial(set);
       for (const mesh of waiting.get(name) ?? []) mesh.material = material;
       waiting.delete(name);
@@ -195,6 +202,29 @@ function materialSteps(name: MaterialName): SkinStep[] {
       props.length = 0;
     },
   ];
+}
+
+/** A material arriving from the worker: what it cost and what it degraded are
+ * replayed onto this thread's diagnostics, then its frames are queued. */
+function deliver(maps: GeneratedMaps): void {
+  if (!ungenerated.delete(maps.name)) return;
+  offThreadGeneratedMs = Math.max(offThreadGeneratedMs, maps.generatedMs);
+  for (const fallback of maps.fallbacks) recordFallback(fallback);
+  reports.push({ name: maps.name, hasNormal: maps.hasNormal, hasRoughness: maps.hasRoughness });
+  steps.push(...skinSteps(maps));
+}
+
+/** No worker, or one that died: generate what is left on this thread, still one
+ * material per frame so the cost is spread as far as a single thread allows. */
+function generateHere(): void {
+  for (const name of [...ungenerated]) {
+    steps.push(() => {
+      if (!ungenerated.delete(name)) return;
+      const set = buildMaterialMaps(name);
+      reports.push({ name, hasNormal: set.hasNormal, hasRoughness: set.hasRoughness });
+      steps.push(...skinSteps(set));
+    });
+  }
 }
 
 /** Lends a prop the default's maps without taking its colour away (FR-008). */
@@ -235,7 +265,8 @@ function publish(scene: Object3D, camera: Camera): MaterialsProbe {
 
   const cache = textureCacheStats();
   publishMaterialDiagnostics({
-    generatedMs: generationStats().generatedMs,
+    // Whichever thread generated: the other one's counter stays at zero (FR-004).
+    generatedMs: Math.max(generationStats().generatedMs, offThreadGeneratedMs),
     textureCount: cache.textures,
     bytes: cache.bytes,
     untexturedMeshes: untextured,
@@ -247,7 +278,9 @@ function publish(scene: Object3D, camera: Camera): MaterialsProbe {
     worldMeshes: meshes.length,
     albedoTextures: albedo.size,
     textures: cache.textures,
-    pending: steps.length,
+    // The maps still being generated are work left too, not only the frames queued.
+    pending: steps.length + ungenerated.size,
+    generatedOffThread: generation.offThread,
     byMaterial,
     minAnisotropy: cache.minAnisotropy,
     allMipmapped: cache.allMipmapped,
@@ -262,6 +295,10 @@ defineSystem({
   setup(ctx: GameContext) {
     planBindings(ctx.scene, ctx.camera);
     attachMaterialDiagnostics(ctx.diag);
+    // Started after the bindings so the worker generates while this thread is
+    // still classifying, and before the first frame so no frame waits on it.
+    generation = startGeneration(ungenerated.size, deliver, generateHere);
+    if (!generation.offThread) generateHere();
     publish(ctx.scene, ctx.camera);
     window.__materialsProbe = () => publish(ctx.scene, ctx.camera);
   },
