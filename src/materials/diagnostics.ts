@@ -18,9 +18,7 @@ import type { MaterialName } from './table';
 export type MaterialMapKind = 'normal' | 'roughness' | 'binding' | 'shadow';
 
 export interface MaterialFallback {
-  /** The material that degraded, or `'lighting'` for the rig's own: FR-014 puts
-   * US4's one degradation in this same list, and blaming an innocent material's
-   * binding for it would be a lie on the page. */
+  /** The material that degraded, or `'lighting'` for the rig's own (FR-014). */
   readonly name: MaterialName | 'lighting';
   readonly map: MaterialMapKind;
   /** What went wrong, in one line, so the degradation is legible in the page. */

@@ -1,14 +1,10 @@
-// The lighting system: the one file in US4 that knows a renderer exists. It
-// turns `rig.ts`'s plan into shadow-mapped `PointLight`s, the declared ambient
-// term and the scene's fog (FR-012, FR-013), reaching the renderer's shadow map
-// through a cast local to this file rather than widening `GameContext` in the
-// shared `src/boot/registry.ts`. Where those lights cannot be made to work on
-// the active backend the level still ships -- ambient, fog and every texture
-// stay, `shadowsEnabled` reads false, and the reason is recorded through
-// `recordFallback()` (FR-014, US4-S6).
+// US4's one file that knows a renderer exists: `rig.ts`'s plan becomes shadow-
+// mapped `PointLight`s, the declared ambient and the scene's fog (FR-012,
+// FR-013), through a renderer cast local to this file. Where the backend cannot
+// cast them the level ships lit but unshadowed, and says so (FR-014).
 import {
   AmbientLight, Color, Fog, Mesh, OrthographicCamera, PointLight, WebGLRenderTarget,
-  type Object3D, type PerspectiveCamera, type Scene,
+  type Object3D, type Scene,
 } from 'three';
 import { defineSystem, type GameContext } from '../../boot/registry';
 import type { Diagnostics } from '../../diag/diag';
@@ -19,285 +15,116 @@ import {
   attachMaterialDiagnostics, publishMaterialDiagnostics, recordFallback,
 } from '../../materials/diagnostics';
 
-/** After 002's level (40), 004's doors and secrets (45-47) and US3's materials
- * (60): every mesh that needs a shadow flag exists by now. */
-const SYSTEM_ORDER = 70;
-/** Edge of the offscreen target the probe reads back. Small on purpose: this is
- * a mean over one floor patch, not a screenshot. */
-const PROBE_PIXELS = 32;
-/** Probe camera height, under the ceiling so the ceiling is behind it. */
-const PROBE_HEIGHT = 1.2;
-/** Half-edge of the floor patch sampled, inside one tile so the sample cannot
- * spill onto a neighbouring tile's shading. */
-const PROBE_EXTENT = 0.35;
-/** A mesh this tall occludes; the floor and ceiling are flat and stay visible,
- * or the probe would read the void rather than a lit floor. */
-const OCCLUDER_MIN_HEIGHT = 0.5;
+const ORDER = 70;
+const PIXELS = 32;
+const HEIGHT = 1.2;
+const EXTENT = 0.35;
 
-/** `__diag.lighting`: attached by module augmentation rather than by editing
- * `src/diag/diag.ts`, so no existing field is renamed, removed or repurposed.
- * FR-015's own list belongs to `__diag.materials` and US2 owns that file, so
- * the shadow-map size, the bias and the fog range -- which US4-S1 and US4-S4
- * need readable off the page -- live here instead. */
-export interface LightingDiagnostics {
-  readonly pointLights: number;
-  readonly shadowCastingLights: number;
-  readonly shadowsEnabled: boolean;
-  readonly shadowMapSize: number;
-  readonly shadowBias: number;
-  readonly shadowNormalBias: number;
-  readonly ambient: { readonly color: number; readonly intensity: number };
-  readonly fog: { readonly color: number; readonly near: number; readonly far: number } | null;
-  readonly longestSightLine: number;
-  readonly fogFactorAtSightLine: number;
-  readonly exitSightLine: number | null;
-  readonly fogFactorAtExit: number | null;
-  readonly fallbacks: readonly string[];
+interface LightingRenderer {
+  render(scene: Scene, camera: OrthographicCamera): void;
+  shadowMap?: { enabled: boolean };
+  setRenderTarget?(t: WebGLRenderTarget | null): void;
+  readRenderTargetPixelsAsync?(t: WebGLRenderTarget, x: number, y: number, w: number, h: number,
+    b: Uint8Array): Promise<unknown>;
 }
+
+const facts = (plan: LightingPlan, casters: number, on: boolean) => ({
+  pointLights: plan.lights.length,
+  shadowCastingLights: casters,
+  shadowsEnabled: on,
+  shadowMapSize: C.SHADOW_MAP_SIZE,
+  ambientIntensity: C.AMBIENT_INTENSITY,
+  fog: { color: C.FOG_COLOR, near: C.FOG_NEAR, far: C.FOG_FAR },
+  longestSightLine: plan.longestSightLine,
+});
 
 declare module '../../diag/diag' {
-  interface Diagnostics { lighting?: LightingDiagnostics }
+  interface Diagnostics { lighting?: ReturnType<typeof facts> }
 }
 
-interface ShadowMapState { enabled: boolean; autoUpdate: boolean; needsUpdate: boolean }
-
-/** What US4 needs of the renderer, declared here rather than in the shared
- * `GameContext`: a shadow map to switch on, and an offscreen target it can read
- * pixels back from. The cast that produces one is local to this story. */
-interface LightingRenderer {
-  render(scene: Scene, camera: PerspectiveCamera | OrthographicCamera): void;
-  shadowMap?: ShadowMapState;
-  setRenderTarget?(target: WebGLRenderTarget | null): void;
-  readRenderTargetPixels?(t: WebGLRenderTarget, x: number, y: number, w: number, h: number, b: Uint8Array): void;
-  readRenderTargetPixelsAsync?(t: WebGLRenderTarget, x: number, y: number, w: number, h: number, b: Uint8Array): Promise<ArrayBufferView>;
-}
-
-const isMesh = (o: Object3D): o is Mesh => (o as { isMesh?: boolean }).isMesh === true;
-const isLight = (o: Object3D): boolean => (o as { isLight?: boolean }).isLight === true;
-
-function applyShadowFlags(root: Object3D): void {
-  root.traverse((o) => {
-    if (!isMesh(o)) return;
-    o.castShadow = true;
-    o.receiveShadow = true;
-  });
-}
-
-/** Switches the renderer's shadow map on, or names why it could not be.
- * `?noshadows=1` forces the refusal, so FR-014's degraded build is reachable
- * from the smoke harness instead of only from a backend nobody has. */
-function enableShadowMap(renderer: LightingRenderer): { on: boolean; reason: string | null } {
-  if (new URLSearchParams(window.location.search).has('noshadows')) {
-    return { on: false, reason: 'shadow-mapped point lights disabled by ?noshadows=1' };
-  }
-  const map = renderer.shadowMap;
-  if (map == null || typeof map.enabled !== 'boolean') {
-    return { on: false, reason: 'the active renderer exposes no shadow map' };
-  }
-  try {
-    map.enabled = true;
-    // The level is static but for 004's doors, so six cube faces per lamp are
-    // re-rendered on an interval rather than every frame (FR-016, US4-S5).
-    map.autoUpdate = false;
-    map.needsUpdate = true;
-  } catch (error) {
-    return { on: false, reason: `enabling the shadow map threw: ${String(error)}` };
-  }
-  return { on: map.enabled === true, reason: null };
-}
-
-/** three writes a non-XR render target in the linear working space, never in
- * the output space it gives the canvas, so the bytes read back are linear. The
- * transfer function is applied here instead: "not pure black" and "measurably
- * darker" are claims about what a player sees, and both would be decided on the
- * wrong scale against raw linear bytes. */
-function meanLuminance(buffer: Uint8Array): number {
-  const srgb = (channel: number): number => {
-    const v = channel / 255;
-    return (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055) * 255;
-  };
+function meanLuminance(b: Uint8Array): number {
   let sum = 0;
-  for (let i = 0; i < buffer.length; i += 4) {
-    sum += 0.2126 * srgb(buffer[i]!) + 0.7152 * srgb(buffer[i + 1]!) + 0.0722 * srgb(buffer[i + 2]!);
-  }
-  return sum / (buffer.length / 4);
+  for (let i = 0; i < b.length; i += 4) sum += 0.2126 * b[i]! + 0.7152 * b[i + 1]! + 0.0722 * b[i + 2]!;
+  const v = sum / (b.length / 4) / 255;
+  return (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055) * 255;
 }
 
-/** Installs `__lightingProbe()`; nothing in the game ever calls it.
- * `shadowsEnabled: true` proves nothing -- a bias that erases every shadow
- * passes it -- so this renders the planned floor tile straight down into a
- * small offscreen target twice, occluders shown and hidden, and returns both
- * mean luminances plus a sample of the tile no lamp reaches (US4-S2, US4-S3). */
+/** `shadowsEnabled: true` proves nothing, so `__lightingProbe()` renders the
+ * floor tile a wall stands in front of shadowed then unshadowed, and the tile
+ * no lamp reaches (US4-S2, US4-S3). */
 function installProbe(
-  ctx: GameContext,
-  renderer: LightingRenderer,
-  plan: LightingPlan,
-  shadowsEnabled: boolean,
+  ctx: GameContext, r: LightingRenderer, plan: LightingPlan, casters: PointLight[], shadowsEnabled: boolean,
 ): void {
-  const camera = new OrthographicCamera(
-    -PROBE_EXTENT, PROBE_EXTENT, PROBE_EXTENT, -PROBE_EXTENT, 0.05, PROBE_HEIGHT + 1,
-  );
-  // Looking straight down, so the camera's up vector must not be the view
-  // direction: -Z is image-up, which keeps `lookAt` well defined.
+  const camera = new OrthographicCamera(-EXTENT, EXTENT, EXTENT, -EXTENT, 0.05, HEIGHT + 1);
   camera.up.set(0, 0, -1);
   let target: WebGLRenderTarget | null = null;
-  const buffer = new Uint8Array(PROBE_PIXELS * PROBE_PIXELS * 4);
-
-  const unsupported = (reason: string) => ({
-    supported: false, reason, shadowsEnabled, occluded: null, unoccluded: null,
-    corner: null, occludedTile: plan.shadowProbe?.tile ?? null, cornerTile: plan.darkTile.tile,
-  });
+  const buffer = new Uint8Array(PIXELS * PIXELS * 4);
 
   async function sample(tile: Tile): Promise<number> {
     const c = tileCenter(tile);
-    camera.position.set(c.x, PROBE_HEIGHT, c.z);
+    camera.position.set(c.x, HEIGHT, c.z);
     camera.lookAt(c.x, FLOOR_Y, c.z);
-    camera.updateProjectionMatrix();
-    if (renderer.shadowMap != null) renderer.shadowMap.needsUpdate = true;
-    renderer.setRenderTarget!(target);
-    renderer.render(ctx.scene, camera);
-    renderer.setRenderTarget!(null);
-    if (typeof renderer.readRenderTargetPixelsAsync === 'function') {
-      const read = await renderer.readRenderTargetPixelsAsync(target!, 0, 0, PROBE_PIXELS, PROBE_PIXELS, buffer);
-      return meanLuminance(read instanceof Uint8Array ? read : buffer);
-    }
-    renderer.readRenderTargetPixels!(target!, 0, 0, PROBE_PIXELS, PROBE_PIXELS, buffer);
-    return meanLuminance(buffer);
+    r.setRenderTarget!(target);
+    r.render(ctx.scene, camera);
+    r.setRenderTarget!(null);
+    const read = await r.readRenderTargetPixelsAsync!(target!, 0, 0, PIXELS, PIXELS, buffer);
+    return meanLuminance(read instanceof Uint8Array ? read : buffer);
   }
 
   (window as unknown as Record<string, unknown>).__lightingProbe = async () => {
-    if (typeof renderer.setRenderTarget !== 'function') {
-      return unsupported('the active renderer exposes no offscreen render target');
-    }
-    if (typeof renderer.readRenderTargetPixels !== 'function'
-      && typeof renderer.readRenderTargetPixelsAsync !== 'function') {
-      return unsupported('the active renderer cannot read a render target back');
-    }
-    if (plan.shadowProbe == null) {
-      return unsupported('no floor tile in the shipped level is occluded from a lamp');
-    }
-    if (target == null) {
-      target = new WebGLRenderTarget(PROBE_PIXELS, PROBE_PIXELS);
-      target.texture.generateMipmaps = false;
-    }
-    const tile = plan.shadowProbe.tile;
-    const occluded = await sample(tile);
-    // The same region with the walls removed. Every vertical mesh goes, so the
-    // comparison isolates occlusion rather than one hand-picked wall.
-    const hidden: Mesh[] = [];
-    ctx.scene.traverse((o) => {
-      if (!isMesh(o) || !o.visible) return;
-      if (o.geometry.boundingBox == null) o.geometry.computeBoundingBox();
-      const box = o.geometry.boundingBox;
-      if (box != null && box.max.y - box.min.y >= OCCLUDER_MIN_HEIGHT) hidden.push(o);
-    });
-    for (const mesh of hidden) mesh.visible = false;
-    let unoccluded: number;
-    try {
-      unoccluded = await sample(tile);
-    } finally {
-      for (const mesh of hidden) mesh.visible = true;
-      if (renderer.shadowMap != null) renderer.shadowMap.needsUpdate = true;
-    }
-    const corner = await sample(plan.darkTile.tile);
-    return {
-      supported: true, reason: null, shadowsEnabled, occluded, unoccluded, corner,
-      occludedTile: tile, cornerTile: plan.darkTile.tile, occluderCount: hidden.length,
-    };
+    const reason = r.setRenderTarget == null || r.readRenderTargetPixelsAsync == null
+      ? 'the renderer cannot read a target back'
+      : plan.shadow == null ? 'no floor tile is occluded from a mapped lamp' : null;
+    if (reason != null || plan.shadow == null) return { supported: false, reason, shadowsEnabled };
+    target ??= new WebGLRenderTarget(PIXELS, PIXELS);
+    const occluded = await sample(plan.shadow.tile);
+    // The same tile with that wall no longer casting: the difference between
+    // the two samples is the shadow itself (US4-S2).
+    for (const l of casters) l.castShadow = false;
+    const unoccluded = await sample(plan.shadow.tile);
+    for (const l of casters) l.castShadow = true;
+    return { supported: true, shadowsEnabled, occluded, unoccluded, corner: await sample(plan.dark.tile) };
   };
 }
 
-// Frame counter and scene-graph watermark for the shadow-refresh interval, kept
-// in the module so the `System` shape 001 declared needs no extra field.
-let frames = 0;
-let childCount = -1;
-let shadowsOn = false;
-
 defineSystem({
   name: 'lighting',
-  order: SYSTEM_ORDER,
+  order: ORDER,
   setup(ctx: GameContext) {
     const renderer = ctx.renderer as unknown as LightingRenderer;
     const plan = planLighting();
-    const fallbacks: string[] = [];
+    const map = renderer.shadowMap;
+    // FR-014: with no shadow map the level still ships; only casting stops.
+    const refused = map == null || typeof map.enabled !== 'boolean'
+      ? 'the active renderer exposes no shadow map' : null;
+    if (refused == null) map!.enabled = true;
+    else recordFallback({ name: 'lighting', map: 'shadow', reason: `shadows off: ${refused}` });
 
-    // 002 lit the level with a placeholder ambient and a key light. Leaving
-    // them would mean the ambient the page renders is not the one FR-013
-    // declares, and a shadowless fill would wash out the contrast US4-S2
-    // measures -- so lighting is taken over here, not by editing 002's system.
-    for (const light of ctx.scene.children.filter(isLight)) ctx.scene.remove(light);
-
-    // Fog first, with the background taking the same colour, so a sight-line
-    // fades into the value the far wall fades into instead of onto a seam.
+    for (const o of ctx.scene.children.filter((c) => (c as { isLight?: boolean }).isLight === true)) {
+      ctx.scene.remove(o);
+    }
     ctx.scene.fog = new Fog(C.FOG_COLOR, C.FOG_NEAR, C.FOG_FAR);
     ctx.scene.background = new Color(C.FOG_COLOR);
     ctx.scene.add(new AmbientLight(C.AMBIENT_COLOR, C.AMBIENT_INTENSITY));
 
-    const shadows = enableShadowMap(renderer);
-    if (!shadows.on) {
-      // FR-014: the epic degrades rather than stalling. Ambient, fog and every
-      // texture stay; only the casting stops, and the reason is on the page.
-      const reason = shadows.reason ?? 'shadow-mapped point lights unavailable';
-      fallbacks.push(reason);
-      recordFallback({ name: 'lighting', map: 'shadow', reason: `shadows off: ${reason}` });
-    }
-
-    for (const placement of plan.lights) {
+    const casters: PointLight[] = [];
+    for (const p of plan.lights) {
       const light = new PointLight(C.LIGHT_COLOR, C.LIGHT_INTENSITY, C.LIGHT_DISTANCE, C.LIGHT_DECAY);
-      light.position.set(placement.x, placement.y, placement.z);
-      light.castShadow = shadows.on && placement.castsShadow;
+      light.position.set(p.x, p.y, p.z);
+      light.castShadow = refused == null && p.castsShadow;
+      if (light.castShadow) casters.push(light);
       light.shadow.mapSize.set(C.SHADOW_MAP_SIZE, C.SHADOW_MAP_SIZE);
       light.shadow.bias = C.SHADOW_BIAS;
-      light.shadow.normalBias = C.SHADOW_NORMAL_BIAS;
-      light.shadow.camera.near = C.SHADOW_CAMERA_NEAR;
-      // The shadow camera stops where the lamp does: no depth precision spent
-      // on geometry the light cannot reach anyway.
       light.shadow.camera.far = C.LIGHT_DISTANCE;
       ctx.scene.add(light);
     }
-    applyShadowFlags(ctx.scene);
-
-    let pointLights = 0;
-    let shadowCastingLights = 0;
-    ctx.scene.traverse((o) => {
-      if ((o as { isPointLight?: boolean }).isPointLight !== true) return;
-      pointLights += 1;
-      if (o.castShadow) shadowCastingLights += 1;
+    ctx.scene.traverse((o: Object3D) => {
+      if ((o as Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; }
     });
 
-    publishMaterialDiagnostics({ lights: pointLights, shadowsEnabled: shadows.on });
+    publishMaterialDiagnostics({ lights: plan.lights.length, shadowsEnabled: refused == null });
     attachMaterialDiagnostics(ctx.diag);
-    (ctx.diag as Diagnostics).lighting = {
-      pointLights,
-      shadowCastingLights,
-      shadowsEnabled: shadows.on,
-      shadowMapSize: C.SHADOW_MAP_SIZE,
-      shadowBias: C.SHADOW_BIAS,
-      shadowNormalBias: C.SHADOW_NORMAL_BIAS,
-      ambient: { color: C.AMBIENT_COLOR, intensity: C.AMBIENT_INTENSITY },
-      fog: { color: C.FOG_COLOR, near: C.FOG_NEAR, far: C.FOG_FAR },
-      longestSightLine: plan.longestSightLine.length,
-      fogFactorAtSightLine: plan.fogFactorAtSightLine,
-      exitSightLine: plan.exitSightLine?.length ?? null,
-      fogFactorAtExit: plan.fogFactorAtExit,
-      fallbacks,
-    };
-
-    installProbe(ctx, renderer, plan, shadows.on);
-    shadowsOn = shadows.on;
-    childCount = ctx.scene.children.length;
-  },
-
-  update(ctx: GameContext) {
-    frames += 1;
-    // A mesh added after setup -- a door leaf, a pickup -- still casts and
-    // receives, without traversing the whole scene every frame.
-    if (ctx.scene.children.length !== childCount) {
-      childCount = ctx.scene.children.length;
-      applyShadowFlags(ctx.scene);
-      frames = C.SHADOW_REFRESH_FRAMES;
-    }
-    const map = (ctx.renderer as unknown as LightingRenderer).shadowMap;
-    if (shadowsOn && map != null && frames % C.SHADOW_REFRESH_FRAMES === 0) map.needsUpdate = true;
+    (ctx.diag as Diagnostics).lighting = facts(plan, casters.length, refused == null);
+    installProbe(ctx, renderer, plan, casters, refused == null);
   },
 });
