@@ -70,10 +70,6 @@ let flash: FlashState = createFlashState();
  *  instead of swallowing the next shot. */
 let lastShotsFired = 0;
 
-/** True once every value the HUD displays has a defined source (FR-018, Edge
- *  Cases). The harness waits on it, so it must not go true over a half-built page. */
-let ready = false;
-
 /** Scales the quad to span the viewport's width at `HUD_DISTANCE` and sit on its
  *  bottom edge. Recomputed on resize, so the bar keeps its proportions rather than
  *  its pixel size. */
@@ -232,10 +228,10 @@ defineSystem({
     }
     drawn = values;
 
-    // Only now: the harness never reads a HUD that has not yet composited every
-    // value it reports (Edge Cases).
-    ready = true;
-    combat.hudReady = ready;
+    // Only now, and only here: `hudReady` goes true once a composite has been
+    // drawn from values that every one of which has a source, so the harness
+    // never reads a half-built HUD (FR-018, Edge Cases).
+    combat.hudReady = true;
   },
 
   resize(ctx) {
