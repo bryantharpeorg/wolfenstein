@@ -19,7 +19,11 @@ import { portraitIndexForHealth } from '../../hud/portrait';
 import { VIEWMODEL_REST, createWeaponViewModel, type WeaponViewModel } from '../../hud/viewmodel';
 
 const MILLISECONDS_PER_SECOND = 1000, DEGREES_TO_RADIANS = Math.PI / 180;
-const HUD_DISTANCE = 0.2, HUD_RENDER_ORDER = 1000;
+const HUD_DISTANCE = 0.2;
+/** Exported for 008's post chain, which composites everything at or above this order over the
+ *  effects rather than through them: the readout stays legible, while the view-model at 900 and
+ *  its muzzle flash go through the chain, which is what US4-S6 measures. */
+export const HUD_RENDER_ORDER = 1000;
 
 let combat: CombatDiagnostics | null = null;
 let surface: HudSurface | null = null;
