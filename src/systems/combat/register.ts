@@ -49,6 +49,19 @@ export function getFireControl(): FireControlState | null {
   return control;
 }
 
+/** US2's restart (FR-011): a fresh magazine, the default weapon, the counters at
+ *  zero. `countedDead` goes too — guard ids repeat across a rebuilt world, so a
+ *  stale entry would swallow that guard's next kill. */
+export function resetCombatRun(): void {
+  control = createFireControl();
+  input?.clear();
+  pendingSelect = null;
+  countedDead.clear();
+  hits = 0;
+  kills = 0;
+  publish();
+}
+
 function publish(): void {
   if (combat == null || control == null) return;
   combat.weapon = control.weapon;

@@ -6,6 +6,7 @@
 // an input seam for the gate, not a gameplay path, and keeps working unchanged
 // once US3 lands.
 
+import { commandsResolve } from '../combat/run-state';
 import { getPlayerState } from './state';
 import { integrate } from './integrate';
 import { LEVEL_GRID } from '../level';
@@ -24,6 +25,9 @@ declare global {
  */
 export function installPlayerDrive(diag: PlayerDiagnostics, openState: OpenState): void {
   window.__playerDrive = (velX, velZ, ms) => {
+    // The same gate the keyboard consults (007 FR-010): a harness movement
+    // command is still a movement command.
+    if (!commandsResolve()) return;
     const state = getPlayerState();
     state.desiredVelX = velX;
     state.desiredVelZ = velZ;
