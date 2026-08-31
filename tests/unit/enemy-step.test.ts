@@ -11,7 +11,14 @@ import {
   PATH_REQUEST_INTERVAL_TICKS,
   SHOT_COOLDOWN_TICKS,
 } from '../../src/enemy/states';
-import { createGuard, isUnreachable, stepGuard, traceGuard } from '../../src/enemy/step';
+import {
+  createGuard,
+  damageGuard,
+  isUnreachable,
+  stepGuard,
+  traceGuard,
+} from '../../src/enemy/step';
+import { GUARD_MAX_HEALTH } from '../../src/enemy/states';
 import type { Cell, Guard, GuardWorld, PathResult, Point } from '../../src/enemy/step';
 
 // The state machine driven as behaviour, with pathing and sight injected through
@@ -47,6 +54,8 @@ interface Script {
   player: (tick: number) => Point;
   /** Optional override for the stub pathfinder. */
   path?: (from: Cell, to: Cell) => PathResult;
+  /** Damage delivered to the guard on the tick being stepped. */
+  damage?: (tick: number) => number;
 }
 
 const straightPath = (from: Cell, to: Cell): PathResult => {
@@ -104,6 +113,7 @@ const run = (script: Script, seed: number, ticks: number, start?: Partial<Guard>
       doorStates: NO_OPEN_TILES,
       playerPos: script.player(tick),
       world,
+      damage: script.damage?.(tick) ?? 0,
     });
     out.lines.push(traceGuard(guard));
     out.states.push(guard.state);
@@ -457,6 +467,168 @@ describe('attack (US1-S6)', () => {
     expect(attacking.state).toBe('attack');
     expect(attacking.facing).toBeCloseTo(-Math.PI / 2, 6);
     expect(attacking.randomConsumed).toBe(false);
+  });
+});
+
+describe('death is terminal (US1-S7, FR-001, Edge Cases)', () => {
+  const inRange = (): Point => ({ x: 6.5, z: 10.5 });
+  const far = (): Point => ({ x: 13.5, z: 10.5 });
+  const lethal = GUARD_MAX_HEALTH;
+
+  it('enters death from every state that can be reached', () => {
+    const killAt = {
+      idle: 3,
+      alert: ALERT_DURATION_TICKS - 2,
+      chase: ALERT_DURATION_TICKS + 1,
+      attack: ALERT_DURATION_TICKS + 2,
+    };
+
+    const fromIdle = run(
+      { sight: never, player: far, damage: (tick) => (tick === killAt.idle ? lethal : 0) },
+      1234,
+      killAt.idle + 3,
+    );
+    expect(fromIdle.states[killAt.idle - 1]).toBe('idle');
+    expect(fromIdle.states[killAt.idle]).toBe('death');
+
+    const fromAlert = run(
+      { sight: always, player: inRange, damage: (tick) => (tick === killAt.alert ? lethal : 0) },
+      1234,
+      killAt.alert + 3,
+    );
+    expect(fromAlert.states[killAt.alert - 1]).toBe('alert');
+    expect(fromAlert.states[killAt.alert]).toBe('death');
+
+    const fromChase = run(
+      {
+        sight: always,
+        player: far,
+        path: () => ({ cells: [], nodesExpanded: 0 }),
+        damage: (tick) => (tick === killAt.chase ? lethal : 0),
+      },
+      1234,
+      killAt.chase + 3,
+    );
+    expect(fromChase.states[killAt.chase - 1]).toBe('chase');
+    expect(fromChase.states[killAt.chase]).toBe('death');
+
+    const fromAttack = run(
+      { sight: always, player: inRange, damage: (tick) => (tick === killAt.attack ? lethal : 0) },
+      1234,
+      killAt.attack + 3,
+    );
+    expect(fromAttack.states[killAt.attack - 1]).toBe('attack');
+    expect(fromAttack.states[killAt.attack]).toBe('death');
+  });
+
+  it('never leaves death, however inviting the input', () => {
+    const killAt = 3;
+    const result = run(
+      { sight: always, player: inRange, damage: (tick) => (tick === killAt ? lethal : 0) },
+      1234,
+      120,
+    );
+    expect(result.states.slice(killAt).every((state) => state === 'death')).toBe(true);
+  });
+
+  it('freezes the guard: no movement, no turning, no PRNG draw after death', () => {
+    const killAt = 3;
+    const result = run(
+      { sight: never, player: far, damage: (tick) => (tick === killAt ? lethal : 0) },
+      1234,
+      40,
+    );
+    const dead = result.guards[killAt] as Guard;
+    for (const guard of result.guards.slice(killAt)) {
+      expect(guard.facing, 'a dead guard does not turn').toBe(dead.facing);
+      expect(guard.x).toBe(dead.x);
+      expect(guard.z).toBe(dead.z);
+      expect(guard.randomConsumed, 'death draws no randomness').toBe(false);
+      // Nothing re-arms behind death's back: no cooldown, no wind-up, no shot.
+      expect(guard.cooldownTicks, 'a dead guard serves no cooldown').toBe(0);
+      expect(guard.windupTicks, 'a dead guard winds up nothing').toBe(0);
+      expect(guard.pendingShot).toBe(false);
+      expect(guard.shotsFired).toBe(dead.shotsFired);
+      expect(guard.path).toEqual([]);
+    }
+    // Its tick still advances, so a renderer can time the death animation.
+    expect((result.guards[39] as Guard).tick).toBe(39);
+    expect((result.guards[39] as Guard).ticksInState).toBe(39 - killAt);
+  });
+
+  it('cancels a pending attack wind-up, so no shot is released after death', () => {
+    // Killed one tick into the wind-up, before the shot would have left.
+    const enters = ALERT_DURATION_TICKS + 1;
+    const killAt = enters + 1;
+    const result = run(
+      { sight: always, player: inRange, damage: (tick) => (tick === killAt ? lethal : 0) },
+      1234,
+      enters + ATTACK_WINDUP_TICKS + SHOT_COOLDOWN_TICKS + 4,
+    );
+    expect(result.states[killAt - 1]).toBe('attack');
+    expect((result.guards[killAt - 1] as Guard).pendingShot).toBe(true);
+
+    const dead = result.guards[killAt] as Guard;
+    expect(dead.state).toBe('death');
+    expect(dead.pendingShot, 'the wind-up is cancelled').toBe(false);
+    expect(dead.windupTicks).toBe(0);
+    expect(dead.cooldownTicks).toBe(0);
+    expect(dead.path).toEqual([]);
+
+    const shotsAtDeath = dead.shotsFired;
+    for (const guard of result.guards.slice(killAt)) {
+      expect(guard.shotsFired, 'no shot is fired after death').toBe(shotsAtDeath);
+    }
+  });
+
+  it('fires no second death transition when damaged again', () => {
+    const killAt = 3;
+    const result = run(
+      { sight: always, player: inRange, damage: (tick) => (tick >= killAt ? lethal : 0) },
+      1234,
+      20,
+    );
+    const dead = result.guards[killAt] as Guard;
+    expect(dead.state).toBe('death');
+    expect(dead.health).toBe(0);
+    for (const guard of result.guards.slice(killAt)) {
+      expect(guard.health, 'a dead guard absorbs nothing further').toBe(0);
+      expect(guard.stateEnteredTick, 'death is entered exactly once').toBe(dead.stateEnteredTick);
+    }
+  });
+
+  it('survives non-lethal damage and keeps behaving', () => {
+    const result = run(
+      { sight: never, player: far, damage: (tick) => (tick === 3 ? GUARD_MAX_HEALTH - 1 : 0) },
+      1234,
+      10,
+    );
+    expect(new Set(result.states)).toEqual(new Set(['idle']));
+    expect((result.guards[9] as Guard).health).toBe(1);
+  });
+
+  it('damageGuard is pure and refuses to lower a dead guard further', () => {
+    const alive = createGuard({ id: 'g0', x: 2.5, z: 10.5 });
+    const hurt = damageGuard(alive, 30);
+    expect(alive.health).toBe(GUARD_MAX_HEALTH);
+    expect(hurt.health).toBe(GUARD_MAX_HEALTH - 30);
+    expect(damageGuard(hurt, 1000).health).toBe(0);
+
+    const dead = { ...hurt, state: 'death' as const, health: 0 };
+    expect(damageGuard(dead, 50)).toBe(dead);
+  });
+
+  it('records death in the trace, and the trace stays byte-stable across runs', () => {
+    const script: Script = {
+      sight: (tick) => tick >= 4,
+      player: inRange,
+      damage: (tick) => (tick === 20 ? lethal : 0),
+    };
+    const first = run(script, 1234, 60);
+    const second = run(script, 1234, 60);
+    expect(second.trace).toBe(first.trace);
+    expect(first.trace).toContain(' death ');
+    expect(traceGuard(first.guards[59] as Guard)).toBe(first.lines[59]);
   });
 });
 
