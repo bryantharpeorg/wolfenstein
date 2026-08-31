@@ -31,11 +31,9 @@ function tsFilesUnder(dir: string): string[] {
   return found;
 }
 
-// The generator/adapter seam (plan.md, Structure Decision): exactly one module
-// under `src/materials/` may reach three.js, and it does nothing but wrap a
-// finished buffer. Naming it here rather than dropping the assertion is the
-// point — the claim tightens from "no file imports three" to "one named file
-// does, and it is the adapter".
+// The generator/adapter seam (plan.md): naming the one module allowed to reach
+// three.js tightens the claim from "no file imports three" to "one file does,
+// and it is the adapter".
 const ADAPTER = 'texture-adapter.ts';
 
 const materialFiles = tsFilesUnder(MATERIALS_DIR).sort();

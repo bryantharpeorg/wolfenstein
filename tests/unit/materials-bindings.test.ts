@@ -24,26 +24,22 @@ import {
   materialForWallType,
   wallMaterialNames,
 } from '../../src/materials/bindings';
-import {
-  materialDiagnostics,
-  resetMaterialDiagnostics,
-} from '../../src/materials/diagnostics';
+import { materialDiagnostics, resetMaterialDiagnostics } from '../../src/materials/diagnostics';
 
 // FR-008 / US3-S1, US3-S3, US3-S4: every wall type ID 002 declares resolves to
-// exactly one of US1's five materials; an ID with no entry resolves to 002's
-// declared default rather than to nothing; and doors, secrets, floor and ceiling
-// each carry a declared material of their own.
+// one of US1's five materials, an ID with no entry to 002's declared default
+// rather than to nothing, and doors, secrets, floor and ceiling each to a
+// declared material of their own.
 
 beforeEach(() => {
   resetMaterialDiagnostics();
 });
 
 describe('every wall type ID 002 declares', () => {
-  it('is covered by the binding table', () => {
+  it('is covered by the binding table, which names only declared materials', () => {
     expect(declaredWallTypes()).toEqual(Object.keys(WALL_MATERIALS).sort());
-    for (const type of declaredWallTypes()) {
-      expect(Object.keys(WALL_TYPE_MATERIALS)).toContain(type);
-    }
+    for (const type of declaredWallTypes()) expect(Object.keys(WALL_TYPE_MATERIALS)).toContain(type);
+    for (const name of Object.values(WALL_TYPE_MATERIALS)) expect(MATERIAL_NAMES).toContain(name);
   });
 
   it.each(Object.keys(WALL_MATERIALS))('maps %s to exactly one of the five materials', (type) => {
@@ -52,12 +48,6 @@ describe('every wall type ID 002 declares', () => {
     expect(resolved.fallback).toBe(false);
     // "Exactly one": the table holds a single name, not a list.
     expect(typeof WALL_TYPE_MATERIALS[type]).toBe('string');
-  });
-
-  it('names only materials the table declares', () => {
-    for (const name of Object.values(WALL_TYPE_MATERIALS)) {
-      expect(MATERIAL_NAMES).toContain(name);
-    }
   });
 });
 
@@ -71,25 +61,17 @@ describe('a wall type ID with no entry', () => {
     expect(DEFAULT_WALL_MATERIAL.name).toBe('default');
   });
 
-  it('records the substitution as a fallback rather than failing silently', () => {
+  it('records one fallback per unmapped id, and none for a declared one', () => {
+    for (const type of declaredWallTypes()) bindSurface({ kind: 'wall', type });
     expect(materialDiagnostics().fallbacks).toHaveLength(0);
+
     bindSurface({ kind: 'wall', type: '8' });
+    bindSurface({ kind: 'wall', type: '8' }); // a second mesh of the same type
     const fallbacks = materialDiagnostics().fallbacks;
     expect(fallbacks).toHaveLength(1);
     expect(fallbacks[0]!.name).toBe(DEFAULT_MATERIAL);
     expect(fallbacks[0]!.map).toBe('binding');
     expect(fallbacks[0]!.reason).toContain('8');
-  });
-
-  it('records one entry per unmapped id, not one per mesh', () => {
-    bindSurface({ kind: 'wall', type: '8' });
-    bindSurface({ kind: 'wall', type: '8' });
-    expect(materialDiagnostics().fallbacks).toHaveLength(1);
-  });
-
-  it('records nothing for a declared id', () => {
-    for (const type of declaredWallTypes()) bindSurface({ kind: 'wall', type });
-    expect(materialDiagnostics().fallbacks).toHaveLength(0);
   });
 });
 
@@ -102,54 +84,45 @@ describe('doors and secrets', () => {
     expect(materialDiagnostics().fallbacks).toHaveLength(0);
   });
 
-  it('read as a door before they are touched: every door differs from the wall beside it', () => {
-    const doorTiles = Object.keys(DOOR_LOCKS).map((key) => {
-      const [x, z] = key.split(',').map(Number);
-      return { x: x!, z: z! };
-    });
-    expect(doorTiles.length).toBeGreaterThan(0);
-    for (const tile of doorTiles) {
-      const beside = adjacentWallMaterials(LEVEL_GRID, tile.x, tile.z);
-      expect(beside.length).toBeGreaterThan(0);
-      expect(beside).not.toContain(DOOR_MATERIAL);
-    }
-  });
-
-  it('every secret differs from the wall it is embedded in', () => {
-    const secrets: Array<{ x: number; z: number }> = [];
+  it('read as themselves before they are touched: each differs from the wall beside it', () => {
+    const doors = Object.keys(DOOR_LOCKS).map((key) => key.split(',').map(Number) as [number, number]);
+    const secrets: Array<[number, number]> = [];
     LEVEL_GRID.forEach((row, z) => {
       [...row].forEach((cell, x) => {
-        if (cell === 'S') secrets.push({ x, z });
+        if (cell === 'S') secrets.push([x, z]);
       });
     });
+    expect(doors.length).toBeGreaterThan(0);
     expect(secrets.length).toBeGreaterThan(0);
-    for (const tile of secrets) {
-      const beside = adjacentWallMaterials(LEVEL_GRID, tile.x, tile.z);
-      expect(beside.length).toBeGreaterThan(0);
-      expect(beside).not.toContain(SECRET_MATERIAL);
+
+    for (const [tiles, material] of [
+      [doors, DOOR_MATERIAL],
+      [secrets, SECRET_MATERIAL],
+    ] as const) {
+      for (const [x, z] of tiles) {
+        const beside = adjacentWallMaterials(LEVEL_GRID, x, z);
+        expect(beside.length).toBeGreaterThan(0);
+        expect(beside).not.toContain(material);
+      }
     }
   });
 });
 
-describe('floor and ceiling', () => {
-  it('each carry their own declared material', () => {
+describe('floor, ceiling and anything unnamed', () => {
+  it('each carry their own declared material, and neither samples a wall texture', () => {
     expect(MATERIAL_NAMES).toContain(FLOOR_MATERIAL);
     expect(MATERIAL_NAMES).toContain(CEILING_MATERIAL);
     expect(FLOOR_MATERIAL).not.toBe(CEILING_MATERIAL);
     expect(bindSurface({ kind: 'floor' }).material).toBe(FLOOR_MATERIAL);
     expect(bindSurface({ kind: 'ceiling' }).material).toBe(CEILING_MATERIAL);
-  });
 
-  it('neither samples a wall texture', () => {
     const wallNames: readonly MaterialName[] = wallMaterialNames();
     expect(wallNames.length).toBeGreaterThan(0);
     expect(wallNames).not.toContain(FLOOR_MATERIAL);
     expect(wallNames).not.toContain(CEILING_MATERIAL);
   });
-});
 
-describe('a surface this spec does not name', () => {
-  it('falls back to the default material rather than rendering untextured', () => {
+  it('and a surface this spec does not name falls back rather than going untextured', () => {
     const bound = bindSurface({ kind: 'unknown' });
     expect(bound.material).toBe(DEFAULT_MATERIAL);
     expect(bound.fallback).toBe(true);
@@ -159,155 +132,81 @@ describe('a surface this spec does not name', () => {
 
 // --- Recognising a surface from the geometry it is drawn as (FR-008) -------
 //
-// The systems that own the meshes are 002's and 004's, and this spec edits
-// neither, so a mesh has to say what it is by where its vertices lie. That
-// question is decided here, without a renderer, so the answer is testable.
+// 002 and 004 own the meshes and this spec edits neither, so a mesh says what it
+// is by where its vertices lie — decided here, without a renderer.
 
-const WALL_HEIGHT_TILES = 2;
+const WALL_TOP = 2;
 
-/** One axis-aligned quad as `{positions, normals}`, wound as 002 winds them. */
-function quad(
-  corners: readonly (readonly [number, number, number])[],
-  normal: readonly [number, number, number],
-): { positions: Float32Array; normals: Float32Array; indices: Uint32Array } {
-  const positions = new Float32Array(corners.flatMap((corner) => [...corner]));
-  const normals = new Float32Array(corners.flatMap(() => [...normal]));
-  return { positions, normals, indices: new Uint32Array([0, 1, 2, 0, 2, 3]) };
+/** One axis-aligned quad from flat corner triples, wound as 002 winds them. */
+function quad(corners: readonly number[], normal: readonly [number, number, number]) {
+  return {
+    positions: new Float32Array(corners),
+    normals: new Float32Array([0, 1, 2, 3].flatMap(() => [...normal])),
+    indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+  };
 }
+
+const kindOf = (face: ReturnType<typeof quad>, offset?: { x: number; y: number; z: number }) =>
+  classifySurface(face.positions, face.normals, face.indices, LEVEL_GRID, offset);
+
+/** The west face of the tile at `(x, z)`: its plane is shared with the open tile
+ *  in front, so only the normal says which owns the bricks. */
+const westFace = (x: number, z: number) =>
+  quad([x, 0, z, x, 0, z + 1, x, WALL_TOP, z + 1, x, WALL_TOP, z], [-1, 0, 0]);
+
+/** A one-tile horizontal quad at height `y`, facing `normal`. */
+const horizontal = (y: number, normal: readonly [number, number, number]) =>
+  quad([10, y, 10, 10, y, 11, 11, y, 11, 11, y, 10], normal);
 
 describe('classifySurface', () => {
   it('recognises a wall face by the tile behind it, not the tile in front', () => {
-    // The west face of the tile at (21, 9): a '2' in the shipped grid, with open
-    // floor at (20, 9). The face plane is shared by both tiles; only the normal
-    // says which of them the bricks belong to.
     expect(LEVEL_GRID[9]![21]).toBe('2');
-    const face = quad(
-      [
-        [21, 0, 9],
-        [21, 0, 10],
-        [21, WALL_HEIGHT_TILES, 10],
-        [21, WALL_HEIGHT_TILES, 9],
-      ],
-      [-1, 0, 0],
-    );
-    expect(classifySurface(face.positions, face.normals, face.indices, LEVEL_GRID)).toEqual({
-      kind: 'wall',
-      type: '2',
-    });
+    expect(kindOf(westFace(21, 9))).toEqual({ kind: 'wall', type: '2' });
   });
 
   it('recognises the floor and the ceiling by their normal and their height', () => {
-    const floor = quad(
-      [
-        [10, FLOOR_Y, 10],
-        [10, FLOOR_Y, 11],
-        [11, FLOOR_Y, 11],
-        [11, FLOOR_Y, 10],
-      ],
-      [0, 1, 0],
-    );
-    const ceiling = quad(
-      [
-        [10, CEILING_Y, 10],
-        [11, CEILING_Y, 10],
-        [11, CEILING_Y, 11],
-        [10, CEILING_Y, 11],
-      ],
-      [0, -1, 0],
-    );
-    expect(classifySurface(floor.positions, floor.normals, floor.indices, LEVEL_GRID).kind).toBe(
-      'floor',
-    );
-    expect(
-      classifySurface(ceiling.positions, ceiling.normals, ceiling.indices, LEVEL_GRID).kind,
-    ).toBe('ceiling');
+    expect(kindOf(horizontal(FLOOR_Y, [0, 1, 0])).kind).toBe('floor');
+    expect(kindOf(horizontal(CEILING_Y, [0, -1, 0])).kind).toBe('ceiling');
   });
 
   it('recognises a door and a secret by the tile every vertex stands on', () => {
-    // 004 slides a leaf and a block, so their geometry is local and the mesh
-    // carries the offset; the classification is made in world space.
-    const doorTile = Object.keys(DOOR_LOCKS)[0]!.split(',').map(Number);
-    const leaf = quad(
-      [
-        [-0.5, -1, 0],
-        [0.5, -1, 0],
-        [0.5, 1, 0],
-        [-0.5, 1, 0],
-      ],
-      [0, 0, -1],
-    );
-    const offset = { x: doorTile[0]! + 0.5, y: 1, z: doorTile[1]! + 0.5 };
-    expect(classifySurface(leaf.positions, leaf.normals, leaf.indices, LEVEL_GRID, offset).kind).toBe(
-      'door',
-    );
+    // 004's leaf is drawn in local space with the offset on the mesh; the
+    // classification is made in world space.
+    const [doorX, doorZ] = Object.keys(DOOR_LOCKS)[0]!.split(',').map(Number);
+    const leaf = quad([-0.5, -1, 0, 0.5, -1, 0, 0.5, 1, 0, -0.5, 1, 0], [0, 0, -1]);
+    expect(kindOf(leaf, { x: doorX! + 0.5, y: 1, z: doorZ! + 0.5 }).kind).toBe('door');
 
-    const secretFace = quad(
-      [
-        [42, 0, 10],
-        [42, 0, 11],
-        [42, WALL_HEIGHT_TILES, 11],
-        [42, WALL_HEIGHT_TILES, 10],
-      ],
-      [-1, 0, 0],
-    );
     expect(LEVEL_GRID[10]![42]).toBe('S');
-    expect(
-      classifySurface(secretFace.positions, secretFace.normals, secretFace.indices, LEVEL_GRID).kind,
-    ).toBe('secret');
+    expect(kindOf(westFace(42, 10)).kind).toBe('secret');
   });
 
   it('calls a prop unknown rather than guessing a wall type for it', () => {
-    // An octahedron's faces are on no axis and at no tile height: a key, not a
-    // surface. It falls to the default material through bindSurface().
+    // A facet on no axis and at no tile height: a key, not a surface.
     const tilted = quad(
-      [
-        [10.5, 0.35, 10.5],
-        [10.7, 0.35, 10.5],
-        [10.6, 0.55, 10.6],
-        [10.5, 0.55, 10.6],
-      ],
+      [10.5, 0.35, 10.5, 10.7, 0.35, 10.5, 10.6, 0.55, 10.6, 10.5, 0.55, 10.6],
       [0.577, 0.577, 0.577],
     );
-    expect(
-      classifySurface(tilted.positions, tilted.normals, tilted.indices, LEVEL_GRID).kind,
-    ).toBe('unknown');
+    expect(kindOf(tilted).kind).toBe('unknown');
   });
 
   it('calls a mesh of mixed surfaces unknown rather than picking one of them', () => {
-    const floor = quad(
-      [
-        [10, FLOOR_Y, 10],
-        [10, FLOOR_Y, 11],
-        [11, FLOOR_Y, 11],
-        [11, FLOOR_Y, 10],
-      ],
-      [0, 1, 0],
-    );
-    const ceiling = quad(
-      [
-        [10, CEILING_Y, 10],
-        [11, CEILING_Y, 10],
-        [11, CEILING_Y, 11],
-        [10, CEILING_Y, 11],
-      ],
-      [0, -1, 0],
-    );
-    const positions = new Float32Array([...floor.positions, ...ceiling.positions]);
-    const normals = new Float32Array([...floor.normals, ...ceiling.normals]);
-    const indices = new Uint32Array([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]);
-    expect(classifySurface(positions, normals, indices, LEVEL_GRID).kind).toBe('unknown');
+    const floor = horizontal(FLOOR_Y, [0, 1, 0]);
+    const ceiling = horizontal(CEILING_Y, [0, -1, 0]);
+    expect(
+      classifySurface(
+        new Float32Array([...floor.positions, ...ceiling.positions]),
+        new Float32Array([...floor.normals, ...ceiling.normals]),
+        new Uint32Array([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]),
+        LEVEL_GRID,
+      ).kind,
+    ).toBe('unknown');
   });
 
-  it('classifies an unindexed buffer by consecutive triples', () => {
-    const face = quad(
-      [
-        [21, 0, 9],
-        [21, 0, 10],
-        [21, WALL_HEIGHT_TILES, 10],
-        [21, WALL_HEIGHT_TILES, 9],
-      ],
-      [-1, 0, 0],
+  it('classifies an unindexed buffer by triples, and an empty one not at all', () => {
+    expect(classifySurface(new Float32Array(0), new Float32Array(0), null, LEVEL_GRID).kind).toBe(
+      'unknown',
     );
+    const face = westFace(21, 9);
     const positions = new Float32Array([
       ...face.positions.subarray(0, 9),
       ...face.positions.subarray(0, 3),
@@ -321,18 +220,13 @@ describe('classifySurface', () => {
     });
   });
 
-  it('is unknown for an empty buffer', () => {
-    expect(classifySurface(new Float32Array(0), new Float32Array(0), null, LEVEL_GRID).kind).toBe(
-      'unknown',
-    );
-  });
-
-  it('walks every merged group 002 emits and leaves none unknown', () => {
+  it('walks every merged group 002 emits, leaves none unknown, and binds them all', () => {
     const faces = emitFaces(LEVEL_GRID);
     const seen: Record<string, string> = {};
     for (const [type, data] of Object.entries(faces.walls)) {
       const surface = classifySurface(data.positions, data.normals, data.indices, LEVEL_GRID);
       seen[type] = surface.kind === 'wall' ? `wall:${surface.type}` : surface.kind;
+      expect(MATERIAL_NAMES).toContain(bindSurface(surface).material);
     }
     expect(seen).toEqual({
       '1': 'wall:1',
@@ -343,26 +237,16 @@ describe('classifySurface', () => {
       D: 'door',
       S: 'secret',
     });
-    expect(
-      classifySurface(faces.floor.positions, faces.floor.normals, faces.floor.indices, LEVEL_GRID)
-        .kind,
-    ).toBe('floor');
-    expect(
-      classifySurface(
-        faces.ceiling.positions,
-        faces.ceiling.normals,
-        faces.ceiling.indices,
-        LEVEL_GRID,
-      ).kind,
-    ).toBe('ceiling');
-  });
 
-  it('binds every one of those groups to a declared material with no fallback', () => {
-    const faces = emitFaces(LEVEL_GRID);
-    for (const data of Object.values(faces.walls)) {
-      const bound = bindSurface(classifySurface(data.positions, data.normals, data.indices, LEVEL_GRID));
-      expect(MATERIAL_NAMES).toContain(bound.material);
+    for (const [plane, kind] of [
+      [faces.floor, 'floor'],
+      [faces.ceiling, 'ceiling'],
+    ] as const) {
+      const surface = classifySurface(plane.positions, plane.normals, plane.indices, LEVEL_GRID);
+      expect(surface.kind).toBe(kind);
+      expect(MATERIAL_NAMES).toContain(bindSurface(surface).material);
     }
+    // Nothing 002 emits needed the default to stand in for it.
     expect(materialDiagnostics().fallbacks).toHaveLength(0);
   });
 });
