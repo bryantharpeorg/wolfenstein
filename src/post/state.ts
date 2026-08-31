@@ -35,10 +35,15 @@ export interface PostEffectDeclaration {
  * The declared table. Digits 5-8 are free: 007 took 1-3 for weapon select, 001's perf
  * overlay took F1, and 004 and US2 took E and R.
  *
- * Motion blur is the one effect that starts off. It is the only one of the four whose
- * cost is paid on every frame *and* whose look a player may reasonably call a defect
- * rather than an effect -- an accumulation smear on a fast turn reads as a dropped frame
- * to anyone who did not ask for it -- so it is opt-in and the other three are opt-out.
+ * Two on and two off, and the split is not arbitrary. Bloom and film grain are cheap --
+ * a blur pyramid at a quarter of the viewport and one full-screen pass -- and they look
+ * the same on either backend, so they are what the game ships looking like. Ambient
+ * occlusion is the most expensive of the four per pixel by a wide margin *and* is the one
+ * effect this chain cannot offer on WebGPU at all (see `chain.ts`), so defaulting it on
+ * would mean the default game looked different depending on which renderer 001 selected;
+ * it is opt-in instead, and a WebGPU player is told through `fallbacks` why opting in
+ * does nothing. Motion blur is opt-in because an accumulation smear on a fast turn reads
+ * as a dropped frame to anyone who did not ask for it.
  */
 export const POST_EFFECTS = {
   bloom: {
@@ -51,7 +56,7 @@ export const POST_EFFECTS = {
   },
   ssao: {
     id: 'ssao',
-    enabledByDefault: true,
+    enabledByDefault: false,
     keyCode: 'Digit6',
     // Radius in world units, and a tile is one unit: a quarter of a tile darkens the
     // wall-floor seam without shading a whole corridor.
