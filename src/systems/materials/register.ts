@@ -35,17 +35,13 @@ import {
   materialForSurface,
   materialForWallType,
 } from '../../materials/bindings';
-import {
-  attachMaterialDiagnostics,
-  materialDiagnostics,
-  publishMaterialDiagnostics,
-} from '../../materials/diagnostics';
+import { attachMaterialDiagnostics, publishMaterialDiagnostics } from '../../materials/diagnostics';
 import { textureBytes } from '../../materials/maps';
 import { TEXTURE_SIZE } from '../../materials/constants';
 import { generationStats } from '../../materials/generate';
 import type { MaterialName } from '../../materials/table';
 import { builtTextures, sharedMaterials, textureSurvey } from '../../materials/texture-adapter';
-import { computeTileUVs } from '../../materials/uv';
+import { computeTileUVs, uvBounds } from '../../materials/uv';
 import { surveyScene, type SceneSurvey } from './survey';
 
 /**
@@ -82,7 +78,11 @@ declare global {
     __materials?: {
       survey(): SceneSurvey;
       bindings(): { surface: string; material: string }[];
-      textures(): { materials: number; textures: number; names: string[] };
+      textures(): ReturnType<typeof textureSurvey>;
+      /** The UV extent every bound surface actually carries, in repeats — the
+       *  runtime half of US3-S5, which the unit tests decide for the pure
+       *  function but not for the geometry the page ships. */
+      spans(): { surface: string; material: string; uSpan: number; vSpan: number }[];
     };
   }
 }
@@ -262,10 +262,18 @@ defineSystem({
     window.__materials = {
       survey: () => surveyScene(ctx),
       bindings: () => bindingSummary().map((entry) => ({ ...entry })),
-      textures: () => {
-        const survey = textureSurvey();
-        return { materials: survey.materials, textures: survey.textures, names: survey.names };
-      },
+      textures: () => textureSurvey(),
+      spans: () =>
+        bound.map((entry) => {
+          const uv = entry.mesh.geometry.getAttribute('uv');
+          const bounds = uvBounds(uv == null ? [] : (uv.array as ArrayLike<number>));
+          return {
+            surface: entry.surface,
+            material: entry.material,
+            uSpan: bounds.maxU - bounds.minU,
+            vSpan: bounds.maxV - bounds.minV,
+          };
+        }),
     };
   },
   update(ctx) {
@@ -282,13 +290,3 @@ defineSystem({
     // resize by `tools/smoke-checks/materials.mjs` and must be unmoved.
   },
 });
-
-/** Test seam: what the system bound, in the order it bound it. */
-export function boundSurfaces(): readonly BoundSurface[] {
-  return bound;
-}
-
-/** Test seam: the live diagnostics record this system writes through. */
-export function materialsDiagnostics() {
-  return materialDiagnostics();
-}

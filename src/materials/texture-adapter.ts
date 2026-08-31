@@ -139,6 +139,23 @@ export function sharedMaterials(): Record<MaterialName, MeshStandardMaterial> {
   return built;
 }
 
+/** One texture's sampling settings, read off the object rather than off the
+ *  source, so US3-S10's "mipmaps and a declared anisotropy are in effect" is a
+ *  fact about what was uploaded. */
+export interface TextureReport {
+  readonly name: string;
+  readonly role: MapRole;
+  readonly width: number;
+  readonly height: number;
+  readonly generateMipmaps: boolean;
+  readonly minFilter: number;
+  readonly magFilter: number;
+  readonly anisotropy: number;
+  readonly wrapS: number;
+  readonly wrapT: number;
+  readonly colorSpace: string;
+}
+
 export interface TextureSurvey {
   /** Materials built so far — five once the level is textured. */
   readonly materials: number;
@@ -148,6 +165,13 @@ export interface TextureSurvey {
   readonly mapsPerMaterial: number;
   /** Every texture's name, `<material>:<role>`, so a duplicate is nameable. */
   readonly names: string[];
+  /** The declared level every texture was uploaded with (FR-011). */
+  readonly anisotropy: number;
+  /** The three-way filter that means "mipmapped", so the harness need not know
+   *  three's numeric constants to assert one is in effect. */
+  readonly mipmapFilter: number;
+  readonly repeatWrapping: number;
+  readonly reports: TextureReport[];
 }
 
 /**
@@ -157,10 +181,29 @@ export interface TextureSurvey {
 export function textureSurvey(): TextureSurvey {
   const distinct = new Set<DataTexture>();
   const names: string[] = [];
+  const reports: TextureReport[] = [];
   for (const entry of cache.values()) {
-    for (const texture of [entry.textures.albedo, entry.textures.normal, entry.textures.roughness]) {
+    const roles: [MapRole, DataTexture][] = [
+      ['albedo', entry.textures.albedo],
+      ['normal', entry.textures.normal],
+      ['roughness', entry.textures.roughness],
+    ];
+    for (const [role, texture] of roles) {
       distinct.add(texture);
       names.push(texture.name);
+      reports.push({
+        name: texture.name,
+        role,
+        width: texture.image.width,
+        height: texture.image.height,
+        generateMipmaps: texture.generateMipmaps,
+        minFilter: texture.minFilter,
+        magFilter: texture.magFilter,
+        anisotropy: texture.anisotropy,
+        wrapS: texture.wrapS,
+        wrapT: texture.wrapT,
+        colorSpace: texture.colorSpace,
+      });
     }
   }
   return {
@@ -168,6 +211,10 @@ export function textureSurvey(): TextureSurvey {
     textures: distinct.size,
     mapsPerMaterial: MAPS_PER_MATERIAL,
     names: names.sort(),
+    anisotropy: TEXTURE_ANISOTROPY,
+    mipmapFilter: LinearMipmapLinearFilter,
+    repeatWrapping: RepeatWrapping,
+    reports,
   };
 }
 
