@@ -116,7 +116,11 @@ async function run() {
 
   let lastTime = performance.now();
 
-  function frame(now: number) {
+  // Read here rather than taken from the rAF argument: that timestamp is when
+  // the browser began the frame, and after a long blocking setup it predates
+  // this loop's own start, reporting a frame rate no frame ever ran at.
+  function frame() {
+    const now = performance.now();
     const delta = now - lastTime;
     lastTime = now;
 
