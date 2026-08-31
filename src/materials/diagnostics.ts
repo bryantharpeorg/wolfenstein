@@ -12,8 +12,10 @@
 import type { Diagnostics } from '../diag/diag';
 import type { MaterialName } from './table';
 
-/** Which of a material's two derived maps could not be produced (FR-007). */
-export type MaterialMapKind = 'normal' | 'roughness';
+/** Which of a material's two derived maps could not be produced (FR-007), plus
+ * `'binding'` for US3's other substitution: a wall type ID with no entry in the
+ * table, resolved to 002's declared default rather than left untextured. */
+export type MaterialMapKind = 'normal' | 'roughness' | 'binding';
 
 export interface MaterialFallback {
   readonly name: MaterialName;
@@ -87,8 +89,13 @@ export function publishMaterialDiagnostics(patch: Partial<MaterialDiagnostics>):
  * material that already failed does not grow the list a second time.
  */
 export function recordFallback(fallback: MaterialFallback): void {
+  // Keyed on the reason too, so two different unmapped wall type IDs stay two
+  // entries rather than collapsing into one and hiding one of them.
   const already = state.fallbacks.some(
-    (entry) => entry.name === fallback.name && entry.map === fallback.map,
+    (entry) =>
+      entry.name === fallback.name &&
+      entry.map === fallback.map &&
+      entry.reason === fallback.reason,
   );
   if (!already) state.fallbacks.push(fallback);
 }
