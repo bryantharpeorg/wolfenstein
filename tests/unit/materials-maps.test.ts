@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { RGBA_CHANNELS } from '../../src/materials/constants';
+import { RGBA_CHANNELS, TEXTURE_SIZE } from '../../src/materials/constants';
 import { MATERIAL_NAMES, MATERIAL_TABLE } from '../../src/materials/table';
 import { generateAlbedo, generationStats } from '../../src/materials/generate';
 import { deriveNormalMap, flatNormalMap } from '../../src/materials/normal';
@@ -60,6 +60,18 @@ describe('three maps in one UV space (US2-S6)', () => {
     expect(set.height.length).toBe(SIZE * SIZE);
     expect(set.hasNormal).toBe(true);
     expect(set.hasRoughness).toBe(true);
+  });
+
+  it('defaults to the declared TEXTURE_SIZE, so the shipped set is 512 square', () => {
+    // Every other case here overrides the size for speed. This one takes the
+    // default, because US2-S6 is a claim about the *declared* size: the maps the
+    // renderer actually receives, not a miniature stand-in for them.
+    const set = buildMaterialMaps('steel');
+    expect(set.size).toBe(TEXTURE_SIZE);
+    for (const map of [set.albedo, set.normal, set.roughness]) {
+      expect(map.length).toBe(TEXTURE_SIZE * TEXTURE_SIZE * RGBA_CHANNELS);
+    }
+    expect(set.height.length).toBe(TEXTURE_SIZE * TEXTURE_SIZE);
   });
 
   it('addresses every map by the same texel offset, with no sampling shift', () => {
