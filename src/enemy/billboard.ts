@@ -61,6 +61,9 @@ export interface Billboard {
   /** Milliseconds of walking, and of dying; the second one only ever grows. */
   walkElapsedMs: number;
   deathElapsedMs: number;
+  /** Whether the death clock has started, so the first frame of the animation is
+   *  rendered rather than stepped over by a long frame. */
+  dying: boolean;
   lastX: number;
   lastZ: number;
 }
@@ -144,6 +147,7 @@ export function createBillboard(guard: BillboardGuard, sheet: GuardSheet = guard
     visible: false,
     walkElapsedMs: 0,
     deathElapsedMs: 0,
+    dying: false,
     lastX: guard.x,
     lastZ: guard.z,
   };
@@ -179,7 +183,11 @@ export function updateBillboard(
   billboard.viewAngle = angle;
 
   if (guard.state === 'death') {
-    billboard.deathElapsedMs += step;
+    // The update that first sees `death` draws the *first* death frame however
+    // long that frame was: a slow frame must not step over the start of the
+    // animation, and after that the clock only ever grows.
+    if (billboard.dying) billboard.deathElapsedMs += step;
+    else billboard.dying = true;
     billboard.frame = deathFrameIndex(plan, billboard.deathElapsedMs);
   } else {
     const moved = Math.hypot(guard.x - billboard.lastX, guard.z - billboard.lastZ);
