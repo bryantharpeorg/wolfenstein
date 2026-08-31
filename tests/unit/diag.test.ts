@@ -63,3 +63,28 @@ describe('diag', () => {
     expect(diag.errors).toEqual(['boom']);
   });
 });
+
+// T025 (FR-011, SC-004): 006 adds three enemy fields to the contract 001 owns,
+// and adds nothing else — the second case is the one that matters.
+describe('the enemy diagnostics fields (FR-011)', () => {
+  it('initialises enemies, enemiesAlive and enemySpawnErrors', () => {
+    const diag = createDiagnostics();
+    expect(diag.enemies).toEqual([]);
+    expect(diag.enemiesAlive).toBe(0);
+    expect(diag.enemySpawnErrors).toEqual([]);
+    diag.enemies = [{ state: 'chase', viewAngle: 3, pathable: false }];
+    expect(Object.keys(diag.enemies[0]!).sort()).toEqual(['pathable', 'state', 'viewAngle']);
+  });
+
+  it('renames, removes and repurposes nothing an earlier spec owns', () => {
+    const diag = createDiagnostics('webgpu');
+    expect(diag.ready).toBe(false);
+    expect(diag.renderer).toBe('webgpu');
+    expect(diag.fps).toBe(0);
+    expect(diag.frameTimeMs).toBe(0);
+    expect(diag.drawCalls).toBe(0);
+    expect(diag.errors).toEqual([]);
+    expect(diag.fallbackReason).toBe(null);
+    expect(diag.level).toBe(null);
+  });
+});
