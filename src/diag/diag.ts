@@ -1,4 +1,5 @@
 import type { LevelStats } from '../level-stats';
+import type { EnemyDiagnosticsRecord } from '../enemy/world';
 
 export interface Diagnostics {
   ready: boolean;
@@ -10,6 +11,16 @@ export interface Diagnostics {
   fallbackReason: string | null;
   /** Level facts published by the level-diag system; null until it runs. */
   level: LevelStats | null;
+  /** One entry per live guard, published by the enemies system (006 FR-011).
+   *  `viewAngle` is written by the enemy-billboards system, which owns bearings. */
+  enemies: readonly EnemyDiagnosticsRecord[];
+  /** Guards whose state is not `death` (006 FR-011). */
+  enemiesAlive: number;
+  /** Named spawn-marker faults (006 FR-006, US3-S7). Empty on a sound level.
+   *  Deliberately not `errors`: 001 owns that array and its meaning is
+   *  "something threw", while a marker on a wall cell is a level fault with
+   *  coordinates. `tools/smoke-checks/enemies.mjs` fails the gate on this one. */
+  enemySpawnErrors: string[];
 }
 
 interface FrameSamples {
@@ -44,6 +55,9 @@ export function createDiagnostics(renderer: 'webgpu' | 'webgl' = 'webgl'): Diagn
     errors: [],
     fallbackReason: null,
     level: null,
+    enemies: [],
+    enemiesAlive: 0,
+    enemySpawnErrors: [],
   };
 }
 
