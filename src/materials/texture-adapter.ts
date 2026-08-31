@@ -118,6 +118,13 @@ export function builtMaterial(name: MaterialName): MeshStandardMaterial | null {
   return materials.get(name) ?? null;
 }
 
+/** Every texture the cache holds, for a caller that has to hand them to a
+ * renderer one at a time — uploading before the first frame rather than during
+ * it. In insertion order, which is material order. */
+export function cachedTextures(): DataTexture[] {
+  return [...textures.values()];
+}
+
 export interface TextureCacheStats {
   /** Distinct `DataTexture` objects uploaded, across every material. */
   readonly textures: number;
