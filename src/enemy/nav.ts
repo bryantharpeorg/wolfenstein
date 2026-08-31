@@ -1,16 +1,24 @@
-// The `Navigator`: the adapter binding 002's level grid and 004's open-tile
-// state into the `GuardWorld` port `./step` declares, plus the three things a
+// The `Navigator`: the adapter that binds 002's level grid and 004's open-tile
+// state into the `GuardWorld` port `./step` declares, and adds the three things a
 // *live* world needs that a pure search does not (FR-003, FR-004, Edge Cases).
 // Pure: no DOM, no three.js (FR-001).
 //
-// A throttle: each guard gets at most one search per
-// `PATH_REQUEST_INTERVAL_TICKS`, and every suppressed request returns the cached
-// answer and is counted, so a regression shows up in the report rather than in
-// the frame time. Invalidation, because a throttle holding a stale answer would
-// be worse than none: a changed goal cell or a door closing under the held path
-// forces a fresh search on the next tick. And claims, so two guards converging
-// on one corridor cell do not grind against each other — each claims the cell it
-// paths to, and the next guard is sent to the nearest free one.
+// One, a throttle. `findPath` is cheap but not free, and ten guards asking every
+// tick is the failure mode this spec exists to make impossible. Each guard gets
+// at most one search per `PATH_REQUEST_INTERVAL_TICKS`; every suppressed request
+// returns the cached answer and is *counted*, so a regression shows up in the
+// report rather than in the frame time.
+//
+// Two, invalidation. A throttle that held a stale answer would be worse than no
+// throttle, so two events cut through it and force a fresh search on the very
+// next tick: the goal cell changing (the player moved, or teleported), and a door
+// the held path traverses closing under it.
+//
+// Three, claims. Two guards converging on one corridor cell would otherwise both
+// path to it and grind against each other. Each guard claims the cell it is
+// actually pathing to; a claimed cell sends the next guard to the nearest free
+// unclaimed one, so no two share a destination, no claim lands in a wall, and
+// nobody is left with nowhere to go.
 
 import { LEVEL_GRID } from '../level';
 import { openTiles } from '../interaction/open-state';
@@ -21,12 +29,13 @@ import { MAX_NODE_EXPANSIONS, findPath } from './pathing';
 import { PATH_REQUEST_INTERVAL_TICKS } from './states';
 import type { Cell, GuardWorld, PathResult, Point } from './step';
 
-/** How far a claim may be displaced from the cell asked for, in Manhattan
- *  steps: enough to seat a small crowd in a one-wide corridor, no more. */
+/** How far from the cell it was asked for a guard's claim may be displaced,
+ *  in Manhattan steps. Three rings is enough for a one-wide corridor to seat a
+ *  small crowd and small enough that a guard never targets somewhere unrelated. */
 export const CLAIM_SEARCH_RADIUS = 3;
 
-/** Claim candidates, nearest ring first in a fixed order, built once at load:
- *  the displacement must not depend on iteration accidents. */
+/** Claim candidates, nearest ring first, in a fixed order — the displacement a
+ *  guard takes must not depend on iteration accidents. Built once at load. */
 const CLAIM_OFFSETS: ReadonlyArray<Cell> = (() => {
   const offsets: Cell[] = [];
   for (let radius = 0; radius <= CLAIM_SEARCH_RADIUS; radius += 1) {
@@ -39,25 +48,28 @@ const CLAIM_OFFSETS: ReadonlyArray<Cell> = (() => {
 })();
 
 export interface NavigatorOptions {
-  /** Defaults to 002's level grid. */
+  /** The grid to path over. Defaults to 002's level. */
   readonly grid?: string[];
-  /** The live open-tile set, re-read per query so a door counts at once. */
+  /** The live open-tile set, re-read per query so a door opening counts at once.
+   *  Defaults to 004's registry. */
   readonly doorStates?: () => OpenState;
   readonly pathRequestIntervalTicks?: number;
   readonly maxNodeExpansions?: number;
 }
 
-/** What the `Navigator` did, so the throttle and the cap are visible rather
- *  than merely applied (FR-004, Edge Cases). */
+/** What the `Navigator` did, so the throttle and the cap are visible rather than
+ *  merely applied (FR-004, Edge Cases). US3 publishes these through `__diag`. */
 export interface NavReport {
-  /** The declared interval and cap, echoed so a regression names itself. */
+  /** The declared throttle interval, echoed so a regression names itself. */
   readonly intervalTicks: number;
   readonly maxNodeExpansions: number;
-  /** Searches run; requests answered from the cache instead. */
+  /** Searches actually run. */
   readonly searches: number;
+  /** Requests answered from the cache because the throttle had not elapsed. */
   readonly throttled: number;
-  /** Searches forced early: by a changed goal, and by a door closing. */
+  /** Searches forced early because the goal cell had changed. */
   readonly staleGoals: number;
+  /** Searches forced early because a door on the held path had closed. */
   readonly doorInvalidations: number;
   readonly nodesExpanded: number;
   readonly maxNodesExpanded: number;
@@ -66,24 +78,24 @@ export interface NavReport {
 }
 
 export interface Navigator {
-  /** Moves to `tick`; the throttle is measured against it. */
+  /** Moves the `Navigator` to `tick`; the throttle is measured against it. */
   beginTick(tick: number): void;
   /** The port for one guard — sight is shared, pathing is per guard. */
   worldFor(guardId: string): GuardWorld;
-  /** The cell this guard is actually pathing to, after claiming. */
+  /** The cell this guard is actually pathing to, after claiming (T017). */
   claimedCell(guardId: string): Cell | null;
-  /** Frees a guard's claim and drops its cached path. */
+  /** Forgets a guard: its claim is freed and its cached path dropped. */
   releaseGuard(guardId: string): void;
   report(): NavReport;
 }
 
-/** What is remembered about one guard between ticks. */
+/** Everything the `Navigator` remembers about one guard between ticks. */
 interface GuardNav {
   lastRequestTick: number;
   result: PathResult | null;
   /** The cell the caller asked for, so a change is detectable. */
   requestedGoal: Cell | null;
-  /** The open door tiles the held path crosses, whose closing invalidates it. */
+  /** The door and secret tiles the held path crosses, open when it was found. */
   doorsOnPath: string[];
   claim: Cell | null;
   world: GuardWorld | null;
@@ -133,9 +145,10 @@ export function createNavigator(options: NavigatorOptions = {}): Navigator {
     return false;
   };
 
-  /** The cell this guard will path to: the one asked for when passable and
-   *  free, else the nearest passable unclaimed cell. Null when the
-   *  neighbourhood is full or solid, reported as unreachable. */
+  /** The cell this guard will actually path to: the one asked for when it is
+   *  passable and free, else the nearest passable unclaimed cell to it. Null
+   *  when the neighbourhood is full or solid, which is reported as unreachable
+   *  rather than as a guard standing on a wall (T017). */
   const claimFor = (guardId: string, goal: Cell, doors: OpenState): Cell | null => {
     const state = stateFor(guardId);
     state.claim = null;
@@ -149,7 +162,8 @@ export function createNavigator(options: NavigatorOptions = {}): Navigator {
     return null;
   };
 
-  /** The door and secret tiles a found path crosses that are open right now. */
+  /** The door and secret tiles a found path crosses that are open right now — the
+   *  exact set whose closing must invalidate it. */
   const doorsOn = (result: PathResult, doors: OpenState): string[] => {
     if ('unreachable' in result) return [];
     const keys: string[] = [];
@@ -184,10 +198,11 @@ export function createNavigator(options: NavigatorOptions = {}): Navigator {
     const state = stateFor(guardId);
     const doors = readDoors();
 
-    // The player moved cell: the held path leads to the old one and is dropped
-    // now rather than walked to. A door the held path crosses shutting likewise
-    // forces a path computed on this tick (Edge Cases).
+    // The player moved cell — or teleported. The held path leads to the old one
+    // and is dropped now rather than walked to (Edge Cases).
     const stale = state.requestedGoal !== null && !sameCell(state.requestedGoal, goal);
+    // A door the held path traverses has shut under it: the next path must
+    // exclude that tile, and must be computed on this tick (Edge Cases).
     const shut = state.doorsOnPath.some((key) => !doors.has(key));
 
     if (state.result !== null && !stale && !shut && tick - state.lastRequestTick < intervalTicks) {

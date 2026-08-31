@@ -2,12 +2,17 @@
 // `unreachable` result (FR-003, FR-004, US2-S1..S4, US2-S9). Pure: no DOM, no
 // three.js (FR-001).
 //
-// Bounded first: `MAX_NODE_EXPANSIONS` is the one named cap, every result
-// reports what it spent, and exhausting the budget ends the search with
-// `unreachable` rather than pressing on — so no map can let a guard stall a
-// frame. Deterministic second: the open set is ordered by a *total* comparison
-// (f, h, cell index, insertion sequence), so two identical calls cannot
-// tie-break differently (US2-S9, SC-003). Nothing here reads a clock.
+// The search is bounded before it is anything else. `MAX_NODE_EXPANSIONS` is the
+// single named constant the spec's clarification asks for, every result reports
+// the count it actually spent, and exhausting the budget ends the search with
+// `unreachable` rather than pressing on. A guard therefore cannot stall a frame
+// however pathological the map, which is the whole point of this module.
+//
+// The search is deterministic second. The open set is ordered by a *total*
+// comparison — f, then h, then cell index, then insertion sequence — so two
+// calls with the same grid and the same door state cannot tie-break differently
+// and return different equal-cost paths (US2-S9, SC-003). Nothing here reads a
+// clock or a generator.
 
 import { isTileBlocking } from '../player/tiles';
 import type { OpenState } from '../player/tiles';
@@ -18,16 +23,21 @@ import type { PathFound, PathResult, PathUnreachable } from './step';
 export { isUnreachable };
 export type { PathFound, PathResult, PathUnreachable };
 
-/** The declared cap (FR-004): one 64x64 grid is 4096 cells, so a search may
- *  expand every cell of the level exactly once and no more. */
+/**
+ * The declared node-expansion cap (FR-004). One 64x64 grid is 4096 cells, so a
+ * search may expand every cell of the level exactly once and no more; anything
+ * past that is a map big enough to stall a frame, and is refused.
+ */
 export const MAX_NODE_EXPANSIONS = 4096;
 
-/** Neighbour order, fixed and orthogonal only: a diagonal step would walk the
- *  pinwheel `los.ts` refuses to see through. Flat, so expansion allocates none. */
+/** Neighbour order, fixed. Orthogonal only: US2-S1 wants adjacent cells, and a
+ *  diagonal step would let a guard walk the pinwheel `los.ts` refuses to see
+ *  through. Declared as one flat table so expansion allocates nothing per cell. */
 const NEIGHBOUR_DX = [0, 1, 0, -1] as const;
 const NEIGHBOUR_DZ = [-1, 0, 1, 0] as const;
 
-/** One open-set entry. `seq` is the last tie-break, so no two compare equal. */
+/** One entry of the open set. `seq` is the last tie-break, so the ordering below
+ *  is total and no two entries can ever compare equal. */
 interface OpenNode {
   readonly node: number;
   readonly f: number;
@@ -35,8 +45,10 @@ interface OpenNode {
   readonly seq: number;
 }
 
-/** Cheapest f, then nearest goal, then lowest cell index, then oldest entry —
- *  each field breaks the tie the one before it left. */
+/** The deterministic ordering (T015): cheapest f, then nearest goal, then the
+ *  lowest cell index, then the oldest entry. Every field after `f` exists to
+ *  break a tie the previous one left, so the result never depends on the order
+ *  the heap happened to be built in. */
 function precedes(a: OpenNode, b: OpenNode): boolean {
   if (a.f !== b.f) return a.f < b.f;
   if (a.h !== b.h) return a.h < b.h;
@@ -44,7 +56,8 @@ function precedes(a: OpenNode, b: OpenNode): boolean {
   return a.seq < b.seq;
 }
 
-/** A binary min-heap over `precedes`; nothing else here needs a queue. */
+/** A binary min-heap over `precedes`. Small enough to keep here rather than in a
+ *  module of its own; nothing else in this spec needs a priority queue. */
 class OpenSet {
   private readonly items: OpenNode[] = [];
 
@@ -96,7 +109,8 @@ function gridWidth(grid: string[]): number {
   return width;
 }
 
-/** Manhattan: admissible and consistent for four-way unit steps. */
+/** Manhattan distance — admissible and consistent for four-way unit steps, so
+ *  the first time the goal is popped its path is already optimal. */
 function heuristic(fromX: number, fromZ: number, to: Cell): number {
   return Math.abs(to.x - fromX) + Math.abs(to.z - fromZ);
 }
@@ -106,11 +120,14 @@ function unreachable(nodesExpanded: number): PathUnreachable {
 }
 
 /**
- * A route from `from` to `to`, a door passable only while `doorStates` marks it
- * open (FR-003). `cells` begins at `from` and ends at `to`, consecutive pairs
- * orthogonally adjacent and none blocking (US2-S1). With no route — or with
- * `maxExpansions` spent — the declared unreachable value is returned instead:
- * never null, never empty, never partial (FR-004, US2-S2).
+ * A route from `from` to `to` over `grid`, treating a door tile as passable only
+ * while `doorStates` marks it open (FR-003).
+ *
+ * The returned `cells` begin at `from` and end at `to`, every consecutive pair
+ * orthogonally adjacent and no cell blocking (US2-S1). When no route exists — or
+ * when the search spends `maxExpansions` without finding one — the declared
+ * unreachable value is returned instead: never `null`, never an empty array, and
+ * never a partial path (FR-003, FR-004, US2-S2).
  */
 export function findPath(
   grid: string[],
@@ -125,7 +142,8 @@ export function findPath(
     x >= 0 && z >= 0 && x < width && z < height;
 
   if (!inBounds(from.x, from.z) || !inBounds(to.x, to.z)) return unreachable(0);
-  // A goal on a wall, or behind a shut door, is unreachable for free.
+  // A goal standing on a wall, or behind a door that is shut, is unreachable
+  // without spending a single expansion on finding that out.
   if (isTileBlocking(grid, to.x, to.z, doorStates)) return unreachable(0);
 
   const startIndex = from.z * width + from.x;
@@ -155,8 +173,8 @@ export function findPath(
     if (current.node === goalIndex) {
       return { cells: reconstruct(cameFrom, startIndex, goalIndex, width), nodesExpanded };
     }
-    // Checked before taking another expansion, so the reported count can never
-    // exceed the cap (FR-004, US2-S4).
+    // The budget is spent on *expansions*, checked before taking another one, so
+    // the reported count can never exceed the cap (FR-004, US2-S4).
     if (nodesExpanded >= maxExpansions) return unreachable(nodesExpanded);
 
     closed[current.node] = 1;

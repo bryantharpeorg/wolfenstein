@@ -1,10 +1,14 @@
 // T019 (FR-007, US3-S3, US3-S4, US3-S5, US3-S8): a guard's shot is a ray test.
 // It stops at the first blocking geometry, reports `blocked` with the distance
 // it terminated at and zero damage, and otherwise pays out the falloff curve for
-// the distance it actually measured. Two assertions are about what the code may
-// *not* contain: the blocking verdict must be `los.ts`'s, and the damage must be
-// the table's — so the call site's source is read back and refused if a curve
-// value appears in it.
+// the distance it actually measured.
+//
+// Two properties here are about what the code may *not* do. The damage must be
+// the table's, so the call site's source is read back and refused if a curve
+// value appears in it. And the ray must stop exactly where US2's sight stops:
+// `attack.ts` walks its own cells because it needs a termination distance sight
+// has no reason to report, so the two are swept against each other below rather
+// than trusted to stay in step.
 
 import { describe, expect, it } from 'vitest';
 import { firstBlockingHit, resolveShot, resolveShots } from '../../src/enemy/attack';
@@ -83,6 +87,37 @@ describe('resolveShot into cover', () => {
       );
     }
     expect(firstBlockingHit(ROOM, NO_OPEN_TILES, { x: 2.5, z: 2.5 }, { x: 9.5, z: 2.5 })).toBeNull();
+  });
+});
+
+describe('the shot ray against US2 sight', () => {
+  // The walk in `attack.ts` and the walk in `los.ts` must agree on every ray,
+  // including the pinwheel corner (US2-S7) that pillars below put in its way.
+  it('is blocked exactly when sight is, over a field of pillars', () => {
+    let draft = roomDraft(16, 16);
+    for (let x = 3; x <= 12; x += 3) {
+      for (let z = 3; z <= 12; z += 3) draft = put(draft, x, z, '1');
+    }
+    const pillars = draw(draft);
+    const doors = openTileSet('6,6');
+    let blockedCount = 0;
+    for (let z = 1; z <= 14; z += 1) {
+      for (let x = 1; x <= 14; x += 1) {
+        const from = { x: 1.5, z: 1.5 };
+        const to = { x: x + 0.5, z: z + 0.5 };
+        const sight = hasLineOfSight(pillars, doors, from, to);
+        const hit = firstBlockingHit(pillars, doors, from, to);
+        expect(hit === null, `ray to ${x},${z} disagrees with sight`).toBe(sight);
+        if (hit !== null) {
+          blockedCount += 1;
+          // A termination is always on the ray and never past its far end.
+          expect(hit.distance).toBeGreaterThan(0);
+          expect(hit.distance).toBeLessThanOrEqual(Math.hypot(to.x - from.x, to.z - from.z));
+        }
+      }
+    }
+    // The field really does block: otherwise the sweep above proves nothing.
+    expect(blockedCount).toBeGreaterThan(20);
   });
 });
 

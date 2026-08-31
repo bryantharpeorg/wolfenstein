@@ -1,6 +1,6 @@
-// Hand-drawn grid fixtures shared by the enemy test files. Kept out of the
-// `.test.ts` glob deliberately: it declares no test, only the paper the pathing,
-// sight and attack assertions are drawn on.
+// Hand-drawn grid fixtures shared by US2's three test files. Kept out of the
+// `.test.ts` glob deliberately: it declares no test, only the paper the pathing
+// and sight assertions are drawn on.
 
 import { expect } from 'vitest';
 import { isTileBlocking } from '../../src/player/tiles';
@@ -29,11 +29,13 @@ export function put(draft: GridDraft, x: number, z: number, cell: string): GridD
   return draft;
 }
 
-export const draw = (draft: GridDraft): string[] => draft.map((row) => row.join(''));
+export function draw(draft: GridDraft): string[] {
+  return draft.map((row) => row.join(''));
+}
 
-export const NO_OPEN_TILES: ReadonlySet<string> = new Set<string>();
-
-export const openTileSet = (...keys: string[]): ReadonlySet<string> => new Set(keys);
+export function cellAt(grid: string[], x: number, z: number): string {
+  return grid[z]?.[x] ?? ' ';
+}
 
 /** Every cell a path could ever stand on, given no door is open. */
 export function freeCellCount(grid: string[]): number {
@@ -47,6 +49,12 @@ export function freeCellCount(grid: string[]): number {
   return count;
 }
 
+export const NO_OPEN_TILES: ReadonlySet<string> = new Set<string>();
+
+export function openTileSet(...keys: string[]): ReadonlySet<string> {
+  return new Set(keys);
+}
+
 /** US2-S1's shape check, stated once: ordered, orthogonally adjacent, wall-free. */
 export function expectWalkablePath(
   grid: string[],
@@ -56,8 +64,10 @@ export function expectWalkablePath(
   to: Cell,
 ): void {
   expect(cells.length).toBeGreaterThan(0);
-  expect(cells[0]).toEqual(from);
-  expect(cells[cells.length - 1]).toEqual(to);
+  const first = cells[0];
+  const last = cells[cells.length - 1];
+  expect(first).toEqual(from);
+  expect(last).toEqual(to);
   for (let i = 1; i < cells.length; i += 1) {
     const previous = cells[i - 1]!;
     const current = cells[i]!;

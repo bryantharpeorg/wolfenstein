@@ -8,14 +8,16 @@
 // is no damage literal in this file, and the test reads the source back to keep
 // it that way (FR-008).
 //
-// The blocking verdict is `./los`'s and not a second opinion: sight and the
-// bullet stop at the same cells because they are the same walk. What a shot
-// needs beyond a boolean is *where* the ray died, which `./los` leaves in
-// `lastBlock` for `lastHit` below to turn into a distance.
+// The walk below is this module's own, because a shot needs something sight
+// does not: *where* the ray died, to report a termination distance. It steps
+// the same cells `./los` does, under the same corner rule and the same cap, so
+// bullet and sight stop together — a property `enemy-attack.test.ts` asserts
+// against `hasLineOfSight` directly rather than leaving it to comment.
 
+import { isTileBlocking } from '../player/tiles';
 import type { OpenState } from '../player/tiles';
 import { damageAtDistance } from './falloff';
-import { hasLineOfSight, lastBlock } from './los';
+import { MAX_LOS_STEPS, LOS_CORNER_EPSILON } from './los';
 import type { Cell, Guard, Point } from './guard';
 
 /** The state a guard must be in for a ray to be cast at all. */
@@ -41,22 +43,75 @@ export interface Shot {
   readonly blockedAt: Cell | null;
 }
 
-/** Where the ray died, derived from the walk `./los` just refused: the same
- *  traversal, the same corner rule, the same cap, and one definition of what
- *  blocks. The endpoints are exempt, as they are for sight. */
-function lastHit(from: Point, to: Point): RayHit {
-  const length = Math.hypot(to.x - from.x, to.z - from.z);
-  return { cell: { x: lastBlock.x, z: lastBlock.z }, distance: lastBlock.fraction * length };
-}
-
-/** The first blocking cell along `from` -> `to`, or `null` when it is clear. */
+/**
+ * The first blocking cell along `from` -> `to`, or `null` when the ray is
+ * clear. A cell-stepping DDA carrying its state in locals; the only allocation
+ * is the `RayHit` a blocked ray returns, and a clear ray allocates nothing.
+ * Endpoints are exempt, as they are for sight: a guard firing from a doorway is
+ * not blocked by the doorway it stands in.
+ */
 export function firstBlockingHit(
   grid: string[],
   doorStates: OpenState,
   from: Point,
   to: Point,
 ): RayHit | null {
-  return hasLineOfSight(grid, doorStates, from, to) ? null : lastHit(from, to);
+  const length = Math.hypot(to.x - from.x, to.z - from.z);
+  const hit = (x: number, z: number, fraction: number): RayHit => ({
+    cell: { x, z },
+    distance: fraction * length,
+  });
+
+  let x = Math.floor(from.x);
+  let z = Math.floor(from.z);
+  const goalX = Math.floor(to.x);
+  const goalZ = Math.floor(to.z);
+  if (x === goalX && z === goalZ) return null;
+
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const stepX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+  const stepZ = dz > 0 ? 1 : dz < 0 ? -1 : 0;
+
+  // Segment fractions: `deltaX` is how much of the ray one whole cell of X
+  // costs, `nextX` how much of it is left before the next X boundary.
+  const deltaX = stepX === 0 ? Infinity : Math.abs(1 / dx);
+  const deltaZ = stepZ === 0 ? Infinity : Math.abs(1 / dz);
+  let nextX = stepX === 0 ? Infinity : (stepX > 0 ? x + 1 - from.x : from.x - x) * deltaX;
+  let nextZ = stepZ === 0 ? Infinity : (stepZ > 0 ? z + 1 - from.z : from.z - z) * deltaZ;
+
+  for (let steps = 0; steps < MAX_LOS_STEPS; steps += 1) {
+    const lead = nextX - nextZ;
+    // How far along the ray the boundary about to be crossed sits.
+    let travelled: number;
+    if (lead < -LOS_CORNER_EPSILON) {
+      travelled = nextX;
+      x += stepX;
+      nextX += deltaX;
+    } else if (lead > LOS_CORNER_EPSILON) {
+      travelled = nextZ;
+      z += stepZ;
+      nextZ += deltaZ;
+    } else {
+      // Both boundaries at once — the ray is threading a corner, and may pass
+      // only if one of the two cells flanking it is open (US2-S7).
+      travelled = nextX;
+      if (
+        isTileBlocking(grid, x + stepX, z, doorStates) &&
+        isTileBlocking(grid, x, z + stepZ, doorStates)
+      ) {
+        return hit(x + stepX, z + stepZ, travelled);
+      }
+      x += stepX;
+      z += stepZ;
+      nextX += deltaX;
+      nextZ += deltaZ;
+    }
+    if (x === goalX && z === goalZ) return null;
+    if (isTileBlocking(grid, x, z, doorStates)) return hit(x, z, travelled);
+  }
+  // Past the cap: stopped rather than pursued, so the walk is O(1)-bounded.
+  return hit(x, z, 1);
 }
 
 /**
@@ -75,9 +130,11 @@ export function resolveShot(
   if (guard.state !== FIRING_STATE) return null;
 
   const origin: Point = { x: guard.x, z: guard.z };
-  const distance = Math.hypot(playerPos.x - origin.x, playerPos.z - origin.z);
+  const hit = firstBlockingHit(grid, doorStates, origin, playerPos);
 
-  if (hasLineOfSight(grid, doorStates, origin, playerPos)) {
+  if (hit === null) {
+    // Clear: the whole flight is paid out at the curve's value for it (FR-008).
+    const distance = Math.hypot(playerPos.x - origin.x, playerPos.z - origin.z);
     return {
       guardId: guard.id,
       outcome: 'hit',
@@ -87,7 +144,6 @@ export function resolveShot(
     };
   }
 
-  const hit = lastHit(origin, playerPos);
   return {
     guardId: guard.id,
     outcome: 'blocked',
