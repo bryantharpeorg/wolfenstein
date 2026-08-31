@@ -100,8 +100,11 @@ function renderBrick(spec: BrickSpec, size: number): RawMaterial {
         putScaled(albedo, index, spec.accent, 0.8 + 0.4 * g);
         continue;
       }
-      const jitter =
-        1 + (hash2d(spec.seed + LAYER_C, column, course) - 0.5) * 2 * p.colourJitter;
+      // The brick index wraps with the pattern: a course shifted by the bond
+      // straddles the buffer edge, and an unwrapped index would tint its two
+      // halves differently — a seam at every tile boundary.
+      const brick = ((column % p.bricksPerCourse) + p.bricksPerCourse) % p.bricksPerCourse;
+      const jitter = 1 + (hash2d(spec.seed + LAYER_C, brick, course) - 0.5) * 2 * p.colourJitter;
       const bevel = clamp01(Math.min(dx - p.mortarU, dy - p.mortarV) / p.bevel);
       const face = 1 - p.faceRelief * (1 - bevel);
       height[index] = p.mortarDepth + (1 - p.mortarDepth) * face * (0.94 + 0.06 * g);
