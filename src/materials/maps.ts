@@ -9,13 +9,12 @@
 // roughness, still applies the albedo, and records the reason (US2-S7).
 
 import { RGBA_CHANNELS, TEXTURE_SIZE } from './constants';
-import { generateAlbedo } from './generate';
-import { generationStats } from './generate';
+import { generateAlbedo, generationStats } from './generate';
 import { deriveNormalMap, flatNormalMap } from './normal';
 import { FALLBACK_ROUGHNESS, constantRoughnessMap, deriveRoughnessMap } from './roughness';
 import { MATERIAL_NAMES, MATERIAL_TABLE } from './table';
 import type { MaterialName, RoughnessRange } from './table';
-import { materialDiagnostics, publishMaterialDiagnostics, recordFallback } from './diagnostics';
+import { publishMaterialDiagnostics, recordFallback } from './diagnostics';
 import type { MaterialMapKind, MaterialMapReport } from './diagnostics';
 
 /** Albedo, normal and roughness: the three maps one material ships (US2-S8). */
@@ -140,7 +139,3 @@ export function buildAllMaterialMaps(
   return sets;
 }
 
-/** What the last build published — the numbers a smoke check reads (FR-015). */
-export function materialMapStats(): ReturnType<typeof materialDiagnostics> {
-  return materialDiagnostics();
-}
