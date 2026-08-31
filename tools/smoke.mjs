@@ -305,6 +305,52 @@ async function sampleLevelTwice(page) {
   return { first, second };
 }
 
+// FR-018's interaction contract. `secretsFound` may never exceed `secretsTotal`,
+// `doorsOpen` must be an integer, and every FR-017 field must be present and of
+// the type the harness reads. Returns the messages; the caller decides how to
+// exit. `__diag.errors` is asserted empty by `assertDiag` on every pass already.
+const INTERACTION_FIELDS = [
+  'doorsTotal',
+  'doorsOpen',
+  'secretsFound',
+  'secretsTotal',
+  'keys',
+  'lastReason',
+  'lastRefusalKeyKind',
+];
+
+function assertInteraction(interaction) {
+  if (interaction == null) return ['window.__diag.interaction is null or undefined'];
+  const errors = [];
+
+  for (const field of INTERACTION_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(interaction, field)) {
+      errors.push(`__diag.interaction is missing the FR-017 field '${field}'`);
+    }
+  }
+  for (const field of ['doorsTotal', 'doorsOpen', 'secretsFound', 'secretsTotal']) {
+    if (!Number.isInteger(interaction[field])) {
+      errors.push(`__diag.interaction.${field} is not an integer: ${JSON.stringify(interaction[field])}`);
+    }
+  }
+  if (interaction.secretsFound > interaction.secretsTotal) {
+    errors.push(
+      `__diag.interaction.secretsFound ${interaction.secretsFound} exceeds secretsTotal ` +
+        `${interaction.secretsTotal} (lastReason=${interaction.lastReason})`,
+    );
+  }
+  if (interaction.secretsFound < 0) {
+    errors.push(`__diag.interaction.secretsFound is negative: ${interaction.secretsFound}`);
+  }
+  if (interaction.doorsOpen > interaction.doorsTotal) {
+    errors.push(`__diag.interaction.doorsOpen ${interaction.doorsOpen} exceeds doorsTotal ${interaction.doorsTotal}`);
+  }
+  if (interaction.keys == null || typeof interaction.keys !== 'object') {
+    errors.push(`__diag.interaction.keys is not an object: ${JSON.stringify(interaction.keys)}`);
+  }
+  return errors;
+}
+
 async function assertDiag(page, url, { expectRenderer, expectReady = true }) {
   const errors = [];
   page.on('pageerror', (error) => {
@@ -328,7 +374,7 @@ async function assertDiag(page, url, { expectRenderer, expectReady = true }) {
   const diag = await page.evaluate(() => {
     const d = window.__diag;
     if (d == null) {
-      return { ready: false, renderer: null, fps: 0, frameTimeMs: 0, drawCalls: 0, errors: ['window.__diag is undefined'], level: null };
+      return { ready: false, renderer: null, fps: 0, frameTimeMs: 0, drawCalls: 0, errors: ['window.__diag is undefined'], level: null, interaction: null };
     }
     return {
       ready: d.ready,
@@ -338,6 +384,7 @@ async function assertDiag(page, url, { expectRenderer, expectReady = true }) {
       drawCalls: d.drawCalls,
       errors: d.errors,
       level: d.level,
+      interaction: d.interaction == null ? null : { ...d.interaction },
     };
   });
 
@@ -380,6 +427,10 @@ async function runNormalPass(browser, url, expectedCounts) {
   const errors = [...result.errors];
 
   errors.push(...assertLevel(result.diag.level, expectedCounts));
+
+  // FR-018: the interaction contract is read on the ordinary pass too, so a
+  // malformed counter fails the gate even when no secret is ever pushed.
+  errors.push(...assertInteraction(result.diag.interaction));
 
   if (result.diag.drawCalls >= 20) {
     errors.push(`drawCalls ${result.diag.drawCalls} is not below 20`);
