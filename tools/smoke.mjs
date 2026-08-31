@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { resolve, extname, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { walkAndReport } from './check-no-binaries.mjs';
 import { SMOKE_FPS_FLOOR } from './smoke-floor.mjs';
@@ -691,6 +691,67 @@ async function runLockedDoorPass(browser, url) {
   return finish();
 }
 
+// The smoke-check loop (T027). A story that needs a runtime assertion adds
+// `tools/smoke-checks/<name>.mjs` and edits nothing here -- the same trick
+// `src/boot/discover.ts` plays on `src/main.ts`, for the same reason: two stories
+// appending to one harness file conflict on adjacent lines.
+//
+// A check module default-exports `async ({ page, url, root }) => string[]`, an
+// empty array meaning it passed. Each one gets its own browser context and its own
+// freshly loaded page, so a check that drives the camera or the player cannot
+// leave the next one reading a moved world.
+const CHECKS_DIR = resolve(__dirname, 'smoke-checks');
+
+function discoverSmokeChecks() {
+  if (!existsSync(CHECKS_DIR)) return [];
+  return readdirSync(CHECKS_DIR)
+    .filter((entry) => entry.endsWith('.mjs'))
+    .sort();
+}
+
+async function runSmokeCheck(browser, url, file) {
+  const errors = [];
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
+
+  try {
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForFunction(() => window.__diag != null && window.__diag.ready === true, {
+      timeout: 15000,
+    });
+    const module = await import(pathToFileURL(resolve(CHECKS_DIR, file)).href);
+    if (typeof module.default !== 'function') {
+      errors.push('module has no default-exported check function');
+    } else {
+      const found = await module.default({ page, url, root });
+      if (!Array.isArray(found)) {
+        errors.push(`check returned ${typeof found}, not an array of messages`);
+      } else {
+        errors.push(...found);
+      }
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  } finally {
+    await context.close();
+  }
+  return errors;
+}
+
+async function runSmokeChecks(browser, url) {
+  const failures = [];
+  for (const file of discoverSmokeChecks()) {
+    const errors = await runSmokeCheck(browser, url, file);
+    if (errors.length === 0) {
+      console.log(`Smoke check ${file}: passed`);
+    } else {
+      failures.push(...errors.map((message) => `${file}: ${message}`));
+    }
+  }
+  return failures;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const injectError = args.includes('--inject-error');
@@ -780,6 +841,14 @@ async function main() {
       fail('Locked door smoke pass failed');
     }
     console.log('Locked door smoke pass: refused by name, then opened with the key it named');
+
+    const checkFailures = await runSmokeChecks(browser, url);
+    if (checkFailures.length > 0) {
+      for (const failure of checkFailures) {
+        console.error(failure);
+      }
+      fail('Smoke check modules failed');
+    }
 
     const noGpu = await runSmokePass(
       browser,
