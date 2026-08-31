@@ -107,6 +107,27 @@ export function materialForSecretAt(
   return BINDING_FALLBACK_MATERIAL;
 }
 
+/**
+ * The same answer without being told the axis: the material of whichever wall
+ * run borders the push-wall at (x, z). 002 merges every `S` tile into one group
+ * and the moving block is built per tile, so both callers have a tile and no
+ * axis; a four-neighbour lookup answers for either travel direction.
+ */
+export function materialForSecretCell(
+  grid: readonly string[],
+  x: number,
+  z: number,
+): MaterialName {
+  for (const axis of ['x', 'z'] as const) {
+    const neighbours = axis === 'x' ? [grid[z - 1]?.[x], grid[z + 1]?.[x]] : [grid[z]?.[x - 1], grid[z]?.[x + 1]];
+    for (const cell of neighbours) {
+      const bound = cell == null ? undefined : WALL_TYPE_MATERIALS[cell];
+      if (bound != null) return bound;
+    }
+  }
+  return BINDING_FALLBACK_MATERIAL;
+}
+
 /** Every material a declared wall type wears, deduplicated. US3-S4 is the
  *  assertion that the floor's and the ceiling's materials are not in this list. */
 export function wallMaterialsInUse(): MaterialName[] {

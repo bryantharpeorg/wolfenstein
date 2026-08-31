@@ -7,6 +7,7 @@ import {
   WALL_TYPE_MATERIALS,
   bindingSummary,
   materialForSecretAt,
+  materialForSecretCell,
   materialForSurface,
   materialForWallType,
   wallMaterialsInUse,
@@ -123,6 +124,14 @@ describe('doors, secrets, floor and ceiling', () => {
     expect(materialForSecretAt(grid, 1, 1, 'x')).toBe(BINDING_FALLBACK_MATERIAL);
   });
 
+  it('answers the same for a secret tile without being told its axis', () => {
+    const grid = ['11111', '10201', '10S01', '10201', '11111'];
+    expect(materialForSecretCell(grid, 2, 2)).toBe(materialForWallType('2'));
+    const alongZ = ['11111', '10001', '12S21', '10001', '11111'];
+    expect(materialForSecretCell(alongZ, 2, 2)).toBe(materialForWallType('2'));
+    expect(materialForSecretCell(['000', '0S0', '000'], 1, 1)).toBe(BINDING_FALLBACK_MATERIAL);
+  });
+
   it('resolves every secret on the shipped level to a declared material', () => {
     for (let z = 0; z < LEVEL_GRID.length; z += 1) {
       const row = LEVEL_GRID[z]!;
@@ -131,6 +140,9 @@ describe('doors, secrets, floor and ceiling', () => {
         for (const axis of ['x', 'z'] as const) {
           expect(MATERIAL_NAMES).toContain(materialForSecretAt(LEVEL_GRID, x, z, axis));
         }
+        expect(MATERIAL_NAMES).toContain(materialForSecretCell(LEVEL_GRID, x, z));
+        // Hidden, not announced: a push-wall wears the run it sits in (004).
+        expect(materialForSecretCell(LEVEL_GRID, x, z)).not.toBe(DOOR_MATERIAL);
       }
     }
   });

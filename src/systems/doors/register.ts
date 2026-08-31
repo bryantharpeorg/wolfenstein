@@ -26,6 +26,11 @@ const DOOR_HEIGHT = CEILING_Y - FLOOR_Y;
 
 let field: DoorField | null = null;
 let interaction: InteractionDiagnostics | null = null;
+/** The names the doorway meshes carry into the scene, so 005's materials system
+ *  binds a door's material by surface rather than by scanning vertices. */
+export const DOOR_SHELL_MESH_NAME = 'door-shell';
+export const DOOR_LEAF_MESH_PREFIX = 'door-leaf-';
+
 const leaves = new Map<Door, Mesh>();
 
 /** The live doors, or null before setup. 007's restart shuts every one through
@@ -61,11 +66,16 @@ function hideStaticDoorFaces(scene: Object3D, doors: readonly Door[]): void {
 function buildMeshes(ctx: GameContext, doors: readonly Door[]): void {
   const shell = buildDoorwayShell(doors);
   // One mesh for every doorway in the level, so the shell is a single draw call.
-  if (shell != null) ctx.scene.add(new Mesh(shell, new MeshStandardMaterial({ color: SHELL_COLOR })));
+  if (shell != null) {
+    const shellMesh = new Mesh(shell, new MeshStandardMaterial({ color: SHELL_COLOR }));
+    shellMesh.name = DOOR_SHELL_MESH_NAME;
+    ctx.scene.add(shellMesh);
+  }
 
   const leafMaterial = new MeshStandardMaterial({ color: LEAF_COLOR });
   for (const door of doors) {
     const mesh = new Mesh(new BoxGeometry(TILE_SIZE, DOOR_HEIGHT, TILE_SIZE), leafMaterial);
+    mesh.name = `${DOOR_LEAF_MESH_PREFIX}${door.x},${door.z}`;
     const position = leafPosition(door);
     mesh.position.set(position.x, FLOOR_Y + DOOR_HEIGHT / 2, position.z);
     ctx.scene.add(mesh);

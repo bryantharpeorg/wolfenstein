@@ -11,6 +11,12 @@ import { hashBuffer, makeRng } from '../../src/materials/rng';
 // FR-001 / US1-S1: the generating path imports no renderer and no browser API,
 // so every texel is assertable under `npm run test`. FR-004 / US1-S7: the
 // resolution is one named constant, never a literal at a call site.
+//
+// 005 US3 adds the one declared exemption the plan names: `texture-adapter.ts`
+// is where a finished buffer becomes a `DataTexture`, so it imports three and
+// nothing else here does. That is asserted *by name* below, together with the
+// claim that keeps the seam real — no other module under `src/materials/`
+// imports the adapter, so the generating path cannot reach three through it.
 
 const MATERIALS_DIR = fileURLToPath(new URL('../../src/materials/', import.meta.url));
 const SRC_DIR = fileURLToPath(new URL('../../src/', import.meta.url));
@@ -31,7 +37,11 @@ function tsFilesUnder(dir: string): string[] {
   return found;
 }
 
+/** The single file allowed to import three: the generator/adapter seam (US3 T024). */
+const ADAPTER = 'texture-adapter.ts';
+
 const materialFiles = tsFilesUnder(MATERIALS_DIR).sort();
+const generatingFiles = materialFiles.filter((path) => !path.endsWith(ADAPTER));
 const sources = new Map(materialFiles.map((path) => [path, readFileSync(path, 'utf8')]));
 
 describe('generating-path purity', () => {
@@ -49,8 +59,25 @@ describe('generating-path purity', () => {
     );
   });
 
-  it.each(materialFiles)('%s imports three nowhere', (path: string) => {
+  it.each(generatingFiles)('%s imports three nowhere', (path: string) => {
     expect(THREE_IMPORT.test(sources.get(path)!)).toBe(false);
+  });
+
+  it('exempts exactly one file, and it is the declared adapter', () => {
+    const importers = materialFiles
+      .filter((path) => THREE_IMPORT.test(sources.get(path)!))
+      .map((path) => path.slice(MATERIALS_DIR.length));
+    expect(importers).toEqual([ADAPTER]);
+  });
+
+  it('lets no generating module reach three through the adapter', () => {
+    const ADAPTER_IMPORT = /from\s+['"][./]*texture-adapter['"]/;
+    for (const path of generatingFiles) {
+      if (ADAPTER_IMPORT.test(sources.get(path)!)) {
+        throw new Error(`${path} imports the adapter, which imports three`);
+      }
+    }
+    expect(true).toBe(true);
   });
 
   it.each(materialFiles)('%s touches no browser API', (path: string) => {
