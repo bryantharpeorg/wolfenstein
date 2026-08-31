@@ -15,10 +15,13 @@ import type { MaterialName } from './table';
 /** Which of a material's two derived maps could not be produced (FR-007), plus
  * `'binding'` for US3's other substitution: a wall type ID with no entry in the
  * table, resolved to 002's declared default rather than left untextured. */
-export type MaterialMapKind = 'normal' | 'roughness' | 'binding';
+export type MaterialMapKind = 'normal' | 'roughness' | 'binding' | 'shadow';
 
 export interface MaterialFallback {
-  readonly name: MaterialName;
+  /** The material that degraded, or `'lighting'` for the rig's own: FR-014 puts
+   * US4's one degradation in this same list, and blaming an innocent material's
+   * binding for it would be a lie on the page. */
+  readonly name: MaterialName | 'lighting';
   readonly map: MaterialMapKind;
   /** What went wrong, in one line, so the degradation is legible in the page. */
   readonly reason: string;
