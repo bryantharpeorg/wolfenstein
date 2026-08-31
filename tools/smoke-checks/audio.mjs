@@ -154,6 +154,10 @@ export default async function check({ page, root }) {
   if (audio.gestured !== false) failures.push('__diag.audio.gestured is true before any gesture');
   if (audio.droneRunning !== false) failures.push('the drone is running before any gesture');
   if (audio.voices !== 0) failures.push(`${audio.voices} voices are live before any gesture`);
+  // US3-S5, stated as the page can state it: not one voice has ever started.
+  if (audio.voicesStarted !== 0) {
+    failures.push(`${audio.voicesStarted} voices had already started before any gesture`);
+  }
   if (!before.ready) failures.push('startup did not complete: __diag.ready is false');
 
   // US3-S9 / FR-013: an omission is a fallbacks line, never an errors entry.
