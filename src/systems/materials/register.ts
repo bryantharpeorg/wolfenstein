@@ -6,7 +6,11 @@
 import { Mesh, MeshStandardMaterial } from 'three';
 import { defineSystem, type GameContext } from '../../boot/registry';
 import { WALL_MATERIALS } from '../../level';
-import { attachMaterialDiagnostics, publishMaterialDiagnostics } from '../../materials/diagnostics';
+import {
+  attachMaterialDiagnostics,
+  materialDiagnostics,
+  publishMaterialDiagnostics,
+} from '../../materials/diagnostics';
 import { buildAllMaterialMaps, type MaterialMapSet } from '../../materials/maps';
 import { type MaterialName } from '../../materials/table';
 import {
@@ -164,7 +168,7 @@ defineSystem({
         (total, set) => total + set.albedo.length + set.normal.length + set.roughness.length,
         0,
       ),
-      generatedMs: performance.now(), // placeholder; will read from maps.ts diagnostics
+      generatedMs: materialDiagnostics().generatedMs,
     });
   },
   resize() {
