@@ -18,8 +18,12 @@ import type { RunState } from './state';
  *  further is applied to the player and the player's commands do not resolve. */
 const PERMISSIONS: Record<RunState, Readonly<Record<GateName, boolean>>> = {
   playing: { guardsMayMove: true, guardsMayFire: true, damageApplies: true, playerMayFire: true },
-  // The world does not pause while the lift travels: FR-003 names `complete`.
-  exiting: { guardsMayMove: true, guardsMayFire: true, damageApplies: true, playerMayFire: true },
+  // The world does not pause while the lift travels — FR-003 names `complete` —
+  // but the player inside it is out of reach. A guard's shot landing during the
+  // travel would otherwise finish a run that is `dead` and `complete` at once,
+  // which is exactly the "won and lost" the Edge Cases forbid; the shot that
+  // arrives *before* the press still refuses the exit (US1-S6).
+  exiting: { guardsMayMove: true, guardsMayFire: true, damageApplies: false, playerMayFire: true },
   dead: { guardsMayMove: true, guardsMayFire: true, damageApplies: false, playerMayFire: false },
   complete: {
     guardsMayMove: false,

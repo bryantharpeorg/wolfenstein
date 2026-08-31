@@ -23,6 +23,8 @@ import {
 import { traceShot, type HitscanGuard, type ShotResult } from '../../combat/hitscan';
 import { SPREAD_SEED, spreadDirection } from '../../combat/spread';
 import { commandsResolve } from '../../combat/run-state';
+import { playerMayFire } from '../../run/gating';
+import { currentRunState } from '../../run/state';
 import { weaponForKeyCode, type WeaponKind } from '../../combat/weapons';
 import { getEnemyWorld } from '../enemies/register';
 
@@ -190,8 +192,9 @@ defineSystem({
     if (control == null || input == null) return;
 
     // The gate FR-010 closes on death: nothing resolves while it is shut, and a
-    // trigger held across it does not fire the frames it missed.
-    if (commandsResolve()) {
+    // trigger held across it does not fire the frames it missed. 008's gate is
+    // the second one, and closes the same way on a run that is over (008 FR-003).
+    if (commandsResolve() && playerMayFire(currentRunState())) {
       resolveShots(ctx, deltaMs / MILLISECONDS_PER_SECOND);
     } else {
       pendingSelect = null;

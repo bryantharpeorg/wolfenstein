@@ -8,6 +8,8 @@
 // behaviour: everything a test could assert lives in `src/enemy/world.ts`.
 
 import { defineSystem, type GameContext } from '../../boot/registry';
+import { guardsMayFire, guardsMayMove } from '../../run/gating';
+import { currentRunState } from '../../run/state';
 import { createEnemyWorld } from '../../enemy/world';
 import type { EnemyWorld, TickReport } from '../../enemy/world';
 
@@ -62,7 +64,22 @@ defineSystem({
   update(ctx, deltaMs) {
     context = ctx;
     if (world === null) return;
-    lastTick = world.tickWorld(deltaMs);
+
+    // 008's gate (008 FR-003): a completed run stops the guards by refusing the
+    // tick, not by unregistering this system — the frame loop carries on, and the
+    // world is still here to be read. A phase that permits movement but not fire
+    // keeps its ticks and drops what they shot.
+    const phase = currentRunState();
+    if (!guardsMayMove(phase)) {
+      lastTick = NO_TICK;
+      ctx.diag.enemiesAlive = world.enemiesAlive();
+      return;
+    }
+
+    const report = world.tickWorld(deltaMs);
+    lastTick = guardsMayFire(phase)
+      ? report
+      : { ticks: report.ticks, shots: [], damageToPlayer: 0 };
     ctx.diag.enemiesAlive = world.enemiesAlive();
   },
 });

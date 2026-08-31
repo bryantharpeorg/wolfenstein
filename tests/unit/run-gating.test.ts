@@ -44,6 +44,10 @@ describe('the run gating predicates (FR-003)', () => {
   it('lets the world run while the lift travels, and stops a dead player firing', () => {
     expect(guardsMayMove('exiting')).toBe(true);
     expect(guardsMayFire('exiting')).toBe(true);
+    // A run cannot be both won and lost (Edge Cases): the player who has already
+    // stepped into the lift takes no further damage from the guards outside it.
+    expect(damageApplies('exiting')).toBe(false);
+    expect(playerMayFire('exiting')).toBe(true);
     expect(playerMayFire('dead')).toBe(false);
     expect(damageApplies('dead')).toBe(false);
     expect(guardsMayMove('dead')).toBe(true);
