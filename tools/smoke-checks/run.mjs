@@ -20,9 +20,23 @@
 // The route itself, and the page-side helpers that walk it, are in
 // `tools/smoke-run-route.mjs`: this file is the assertions, that one is the driving.
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { driveToExit, frames, installDriver, readAll } from '../smoke-run-route.mjs';
 
 export const name = 'run';
+
+/** The row labels, read from the module that declares them rather than restated here,
+ *  so this check asserts the page agrees with `src/run/stats.ts` and not with itself
+ *  (the shape `pickups.mjs` and `vitals.mjs` established). */
+function readLabels(root) {
+  const block = readFileSync(resolve(root, 'src/run/stats.ts'), 'utf8')
+    .match(/STATS_LABELS\s*=\s*\{([\s\S]*?)\}\s*as const;/);
+  if (block == null) return null;
+  const labels = {};
+  for (const [, key, value] of block[1].matchAll(/(\w+):\s*'([^']+)'/g)) labels[key] = value;
+  return labels;
+}
 
 /** FR-008's field set, restated here so a missing field names itself. */
 const RUN_FIELDS = [
@@ -30,11 +44,14 @@ const RUN_FIELDS = [
   'treasureFound', 'treasureTotal', 'score', 'rating', 'completions',
 ];
 
-export default async function check({ page }) {
+export default async function check({ page, root }) {
   const errors = [];
   const claim = (ok, message) => {
     if (!ok) errors.push(message);
   };
+
+  const LABEL = readLabels(root);
+  if (LABEL == null) return ['could not read STATS_LABELS from src/run/stats.ts'];
 
   const ready = await page.evaluate(
     () =>
@@ -50,7 +67,7 @@ export default async function check({ page }) {
   await frames(page, 3);
 
   // US2-S7: the contract, before anything is driven. A field missing at spawn is
-  // missing at completion too, and this reads better than a undefined comparison below.
+  // missing at completion too, and this reads better than an undefined comparison below.
   const spawn = await readAll(page);
   for (const field of RUN_FIELDS) {
     claim(
@@ -83,17 +100,20 @@ export default async function check({ page }) {
   // FR-006: every displayed value equals the counter that owns it. The screen prints
   // "found/total  pct%", so the ratio is what is compared; the percentage is derived
   // from the same pair and asserted in `run-stats.test.ts`.
-  displays('TIME', '');
-  displays('KILLS', `${done.combat.kills}/${done.guardsTotal}`);
-  displays('SECRETS', `${done.interaction.secretsFound}/${done.interaction.secretsTotal}`);
-  displays('TREASURE', `${done.combat.treasureFound}/${done.combat.treasureTotal}`);
   claim(
-    shown.get('SCORE') === `${done.combat.score}`,
-    `the stats screen shows SCORE as '${shown.get('SCORE')}', not '${done.combat.score}'`,
+    /^\d+:\d\d$/.test(shown.get(LABEL.time) ?? ''),
+    `the stats screen shows ${LABEL.time} as '${shown.get(LABEL.time)}', not minutes and seconds`,
+  );
+  displays(LABEL.kills, `${done.combat.kills}/${done.guardsTotal}`);
+  displays(LABEL.secrets, `${done.interaction.secretsFound}/${done.interaction.secretsTotal}`);
+  displays(LABEL.treasure, `${done.combat.treasureFound}/${done.combat.treasureTotal}`);
+  claim(
+    shown.get(LABEL.score) === `${done.combat.score}`,
+    `the stats screen shows ${LABEL.score} as '${shown.get(LABEL.score)}', not '${done.combat.score}'`,
   );
   claim(
-    shown.get('RATING') === done.run.rating,
-    `the stats screen shows RATING as '${shown.get('RATING')}', not '${done.run.rating}'`,
+    shown.get(LABEL.rating) === done.run.rating,
+    `the stats screen shows ${LABEL.rating} as '${shown.get(LABEL.rating)}', not '${done.run.rating}'`,
   );
 
   // FR-006 again, on the reported half: `__diag.run` is the same read as the screen.
