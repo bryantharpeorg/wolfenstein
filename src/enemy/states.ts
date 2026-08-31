@@ -46,6 +46,9 @@ export const LAST_KNOWN_TIMEOUT_TICKS = 60;
 /** Cells: within this of the last known spot counts as having reached it. */
 export const LAST_KNOWN_ARRIVAL_CELLS = 0.3;
 
+/** Cells: within this of a path node's centre, the guard has arrived at it. */
+export const PATH_NODE_ARRIVAL_CELLS = 0.2;
+
 /** Ticks between path requests per guard — the declared throttle (Edge Cases). */
 export const PATH_REQUEST_INTERVAL_TICKS = 8;
 

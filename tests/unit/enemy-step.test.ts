@@ -3,11 +3,15 @@ import { readFileSync } from 'node:fs';
 import { createRng } from '../../src/enemy/rng';
 import {
   ALERT_DURATION_TICKS,
+  ATTACK_RANGE_CELLS,
+  ATTACK_WINDUP_TICKS,
   LAST_KNOWN_TIMEOUT_TICKS,
   LAST_KNOWN_ARRIVAL_CELLS,
   MOVE_SPEED_CELLS_PER_TICK,
+  PATH_REQUEST_INTERVAL_TICKS,
+  SHOT_COOLDOWN_TICKS,
 } from '../../src/enemy/states';
-import { createGuard, stepGuard, traceGuard } from '../../src/enemy/step';
+import { createGuard, isUnreachable, stepGuard, traceGuard } from '../../src/enemy/step';
 import type { Cell, Guard, GuardWorld, PathResult, Point } from '../../src/enemy/step';
 
 // The state machine driven as behaviour, with pathing and sight injected through
@@ -60,6 +64,8 @@ const straightPath = (from: Cell, to: Cell): PathResult => {
 
 interface Run {
   trace: string;
+  pathRequests: number[];
+  pathGoals: Cell[];
   lines: string[];
   states: string[];
   random: boolean[];
@@ -70,12 +76,26 @@ const run = (script: Script, seed: number, ticks: number, start?: Partial<Guard>
   const rng = createRng(seed);
   const world: GuardWorld = {
     hasLineOfSight: (_a, _b) => currentSight,
-    findPath: (from, to) => (script.path ?? straightPath)(from, to),
+    findPath: (from, to) => {
+      out.pathRequests.push(currentTick);
+      out.pathGoals.push(to);
+      return (script.path ?? straightPath)(from, to);
+    },
   };
   let currentSight = false;
+  let currentTick = 0;
   let guard = createGuard({ id: 'g0', x: 2.5, z: 10.5, ...start });
-  const out: Run = { trace: '', lines: [], states: [], random: [], guards: [] };
+  const out: Run = {
+    trace: '',
+    pathRequests: [],
+    pathGoals: [],
+    lines: [],
+    states: [],
+    random: [],
+    guards: [],
+  };
   for (let tick = 0; tick < ticks; tick += 1) {
+    currentTick = tick;
     currentSight = script.sight(tick);
     guard = stepGuard(guard, {
       tick,
@@ -98,18 +118,31 @@ const never = () => false;
 const always = () => true;
 const farPlayer = (): Point => ({ x: 13.5, z: 10.5 });
 
+const MODULES = ['step.ts', 'guard.ts'];
+const sourceOf = (file: string): string =>
+  readFileSync(new URL(`../../src/enemy/${file}`, import.meta.url), 'utf8');
+
 describe('step module purity (FR-001, SC-001)', () => {
   it('imports neither three nor a DOM API', () => {
-    const source = readFileSync(new URL('../../src/enemy/step.ts', import.meta.url), 'utf8');
-    expect(THREE_IMPORT.test(source)).toBe(false);
-    expect(DOM_GLOBAL.test(source)).toBe(false);
+    for (const file of MODULES) {
+      expect(THREE_IMPORT.test(sourceOf(file)), file).toBe(false);
+      expect(DOM_GLOBAL.test(sourceOf(file)), file).toBe(false);
+    }
   });
 
   it('imports neither the pathfinder nor the raycast US2 will write', () => {
-    const source = readFileSync(new URL('../../src/enemy/step.ts', import.meta.url), 'utf8');
-    expect(/from\s+['"]\.\/pathing['"]/.test(source), 'step.ts must not import pathing').toBe(false);
-    expect(/from\s+['"]\.\/los['"]/.test(source), 'step.ts must not import los').toBe(false);
-    expect(/from\s+['"]\.\/nav['"]/.test(source), 'step.ts must not import nav').toBe(false);
+    for (const file of MODULES) {
+      const source = sourceOf(file);
+      expect(/from\s+['"]\.\/pathing['"]/.test(source), `${file} must not import pathing`).toBe(false);
+      expect(/from\s+['"]\.\/los['"]/.test(source), `${file} must not import los`).toBe(false);
+      expect(/from\s+['"]\.\/nav['"]/.test(source), `${file} must not import nav`).toBe(false);
+    }
+  });
+
+  it('keeps every module under the 400-line ceiling the constitution fixes', () => {
+    for (const file of [...MODULES, 'states.ts', 'rng.ts']) {
+      expect(sourceOf(file).split('\n').length, file).toBeLessThanOrEqual(400);
+    }
   });
 
   it('loads in an environment with no window defined', () => {
@@ -263,6 +296,167 @@ describe('alert -> idle when sight is lost (US1-S4)', () => {
     expect(result.states[LAST_KNOWN_TIMEOUT_TICKS]).toBe('idle');
     const stopped = result.guards[LAST_KNOWN_TIMEOUT_TICKS - 1] as Guard;
     expect(stopped.x, 'a guard never walks into a wall cell').toBeLessThan(8);
+  });
+});
+
+describe('chase (US1-S4, US1-S5, Edge Cases)', () => {
+  // Sight held throughout, player parked out of attack range down the room.
+  const player = (): Point => ({ x: 13.5, z: 10.5 });
+  const toChase = ALERT_DURATION_TICKS;
+
+  it('closes on the player along the path the injected world returned', () => {
+    const result = run({ sight: always, player }, 1234, toChase + 20);
+    expect(result.states[toChase]).toBe('chase');
+    const entered = result.guards[toChase] as Guard;
+    const later = result.guards[toChase + 15] as Guard;
+    expect(later.x).toBeGreaterThan(entered.x);
+    expect(later.state).toBe('chase');
+  });
+
+  it('throttles path requests to the declared interval', () => {
+    const result = run({ sight: always, player }, 1234, toChase + 40);
+    const chaseRequests = result.pathRequests.filter((tick) => tick >= toChase);
+    expect(chaseRequests.length).toBeGreaterThan(1);
+    for (let i = 1; i < chaseRequests.length; i += 1) {
+      const gap = (chaseRequests[i] as number) - (chaseRequests[i - 1] as number);
+      expect(gap, 'no guard may request a path every tick').toBeGreaterThanOrEqual(
+        PATH_REQUEST_INTERVAL_TICKS,
+      );
+    }
+    for (const guard of result.guards) expect(guard.pathable).toBe(true);
+  });
+
+  it('records pathable false and holds position when the route is unreachable', () => {
+    const unreachable = (): PathResult => ({ unreachable: true, nodesExpanded: 7 });
+    const result = run({ sight: always, player, path: unreachable }, 1234, toChase + 6);
+    const stuck = result.guards[toChase + 5] as Guard;
+    expect(stuck.state).toBe('chase');
+    expect(stuck.pathable).toBe(false);
+    expect(stuck.x).toBe(2.5);
+    expect(isUnreachable({ unreachable: true, nodesExpanded: 0 })).toBe(true);
+    expect(isUnreachable({ cells: [], nodesExpanded: 0 })).toBe(false);
+  });
+
+  it('discards a stale path on the tick the player moves, and re-requests within the throttle', () => {
+    // The player teleports across the room at the tick named below. The stale
+    // path must be dropped rather than walked to the old destination, and the
+    // next request must name the new one (Edge Cases).
+    const jump = toChase + 3;
+    const teleporting = (tick: number): Point =>
+      tick < jump ? { x: 13.5, z: 10.5 } : { x: 13.5, z: 2.5 };
+    const result = run({ sight: always, player: teleporting }, 1234, jump + 20);
+
+    const following = result.guards[jump - 1] as Guard;
+    expect(following.path.length, 'a path was being followed before the jump').toBeGreaterThan(0);
+    expect(following.pathGoal).toEqual({ x: 13, z: 10 });
+
+    const jumped = result.guards[jump] as Guard;
+    expect(jumped.path, 'the stale path is discarded on that same tick').toEqual([]);
+    expect(jumped.pathGoal).toEqual({ x: 13, z: 2 });
+
+    const afterJump = result.pathRequests
+      .map((tick, index) => ({ tick, goal: result.pathGoals[index] as Cell }))
+      .filter((request) => request.tick >= jump);
+    expect(afterJump.length).toBeGreaterThan(0);
+    const first = afterJump[0] as { tick: number; goal: Cell };
+    expect(first.tick - jump).toBeLessThanOrEqual(PATH_REQUEST_INTERVAL_TICKS);
+    expect(first.goal, 'the new request names the new destination').toEqual({ x: 13, z: 2 });
+  });
+
+  it('moves only along a path, never beelining when it has none', () => {
+    const noPath = (): PathResult => ({ cells: [], nodesExpanded: 0 });
+    const result = run({ sight: always, player, path: noPath }, 1234, toChase + 8);
+    for (const guard of result.guards) {
+      expect(guard.x).toBe(2.5);
+      expect(guard.z).toBe(10.5);
+    }
+  });
+});
+
+describe('chase -> attack on range and sight (US1-S5)', () => {
+  const inRange = (): Point => ({ x: 2.5 + ATTACK_RANGE_CELLS - 0.5, z: 10.5 });
+  const outOfRange = (): Point => ({ x: 2.5 + ATTACK_RANGE_CELLS + 2, z: 10.5 });
+
+  it('attacks once the player is inside the declared range with sight held', () => {
+    const player = (tick: number) => (tick < ALERT_DURATION_TICKS + 2 ? outOfRange() : inRange());
+    const result = run({ sight: always, player, path: () => ({ cells: [], nodesExpanded: 0 }) }, 1234, ALERT_DURATION_TICKS + 5);
+    expect(result.states[ALERT_DURATION_TICKS]).toBe('chase');
+    expect(result.states[ALERT_DURATION_TICKS + 1]).toBe('chase');
+    expect(result.states[ALERT_DURATION_TICKS + 2]).toBe('attack');
+  });
+
+  it('does not attack in range without sight (US3-S5)', () => {
+    const result = run({ sight: (tick) => tick < ALERT_DURATION_TICKS + 1, player: inRange }, 1234, ALERT_DURATION_TICKS + 6);
+    for (const state of result.states) expect(state).not.toBe('attack');
+  });
+});
+
+describe('attack (US1-S6)', () => {
+  const inRange = (): Point => ({ x: 6.5, z: 10.5 });
+  const enters = ALERT_DURATION_TICKS + 1;
+
+  it('arms a cooldown and a wind-up on entry, then releases exactly one shot', () => {
+    const result = run({ sight: always, player: inRange }, 1234, enters + SHOT_COOLDOWN_TICKS + 2);
+    expect(result.states[enters]).toBe('attack');
+    const armed = result.guards[enters] as Guard;
+    expect(armed.cooldownTicks).toBe(SHOT_COOLDOWN_TICKS);
+    expect(armed.pendingShot).toBe(true);
+    expect(armed.shotsFired).toBe(0);
+
+    const fired = result.guards[enters + ATTACK_WINDUP_TICKS] as Guard;
+    expect(fired.shotsFired).toBe(1);
+    expect(fired.pendingShot).toBe(false);
+  });
+
+  it('counts its cooldown down one tick at a time and re-arms while in contact', () => {
+    const ticks = enters + SHOT_COOLDOWN_TICKS * 2 + 2;
+    const result = run({ sight: always, player: inRange }, 1234, ticks);
+    for (let i = 0; i <= SHOT_COOLDOWN_TICKS; i += 1) {
+      const guard = result.guards[enters + i] as Guard;
+      expect(guard.state, `tick ${enters + i}`).toBe('attack');
+      expect(guard.cooldownTicks, `tick ${enters + i}`).toBe(SHOT_COOLDOWN_TICKS - i);
+    }
+    const rearmed = result.guards[enters + SHOT_COOLDOWN_TICKS + 1] as Guard;
+    expect(rearmed.cooldownTicks).toBe(SHOT_COOLDOWN_TICKS);
+    expect(rearmed.pendingShot).toBe(true);
+    expect((result.guards[ticks - 1] as Guard).shotsFired).toBe(2);
+  });
+
+  it('returns to chase only once the current shot cooldown ends, not before', () => {
+    // Sight breaks two ticks into the attack, mid-cooldown.
+    const breakAt = enters + 2;
+    const result = run(
+      { sight: (tick) => tick < breakAt, player: inRange },
+      1234,
+      enters + SHOT_COOLDOWN_TICKS + 4,
+    );
+    for (let tick = breakAt; tick < enters + SHOT_COOLDOWN_TICKS + 1; tick += 1) {
+      expect(result.states[tick], `tick ${tick} released mid-cooldown`).toBe('attack');
+    }
+    expect(result.states[enters + SHOT_COOLDOWN_TICKS + 1]).toBe('chase');
+  });
+
+  it('returns to chase once the player leaves attack range and the cooldown ends', () => {
+    const leaveAt = enters + 2;
+    const player = (tick: number): Point =>
+      tick < leaveAt ? { x: 6.5, z: 10.5 } : { x: 2.5 + ATTACK_RANGE_CELLS + 3, z: 10.5 };
+    const result = run(
+      { sight: always, player, path: () => ({ cells: [], nodesExpanded: 0 }) },
+      1234,
+      enters + SHOT_COOLDOWN_TICKS + 3,
+    );
+    for (let tick = leaveAt; tick < enters + SHOT_COOLDOWN_TICKS + 1; tick += 1) {
+      expect(result.states[tick], `tick ${tick}`).toBe('attack');
+    }
+    expect(result.states[enters + SHOT_COOLDOWN_TICKS + 1]).toBe('chase');
+  });
+
+  it('holds position and faces the player while attacking', () => {
+    const result = run({ sight: always, player: inRange }, 1234, enters + 4);
+    const attacking = result.guards[enters + 3] as Guard;
+    expect(attacking.state).toBe('attack');
+    expect(attacking.facing).toBeCloseTo(-Math.PI / 2, 6);
+    expect(attacking.randomConsumed).toBe(false);
   });
 });
 

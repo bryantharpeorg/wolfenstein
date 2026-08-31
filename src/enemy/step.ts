@@ -5,9 +5,9 @@
 // The load-bearing line in this file is the `GuardWorld` interface below. Sight
 // and pathing are *declared* here and *supplied* by the caller — US1's tests hand
 // it a stub over a hand-drawn grid, US2 hands it the real nav binding over the
-// level grid and the door state. That is why this module ships and is proven before a
-// pathfinder exists, and why US2 never has to open this file: it imports neither
-// `./pathing` nor `./los` nor `./nav`, and it never will.
+// level grid and the door state. That is why this module ships and is proven
+// before a pathfinder exists, and why US2 never has to open this file: it
+// imports neither `./pathing` nor `./los` nor `./nav`, and it never will.
 //
 // Which state a guard is in is decided in exactly one place — `firstTransition`
 // over the table in `./states`. This file only assembles that table's input and
@@ -16,31 +16,26 @@
 import { isTileBlocking, tileKey } from '../player/tiles';
 import { wrapYaw } from '../player/look';
 import type { Rng } from './rng';
+import { damageGuard } from './guard';
+import type { Cell, Guard, Point } from './guard';
 import {
   ATTACK_WINDUP_TICKS,
-  GUARD_MAX_HEALTH,
-  GUARD_SPAWN_STATE,
   IDLE_TURN_INTERVAL_TICKS,
   IDLE_TURN_JITTER_RADIANS,
   IDLE_TURN_RATE_RADIANS,
   LAST_KNOWN_ARRIVAL_CELLS,
   MOVE_SPEED_CELLS_PER_TICK,
+  PATH_NODE_ARRIVAL_CELLS,
+  PATH_REQUEST_INTERVAL_TICKS,
   SHOT_COOLDOWN_TICKS,
   firstTransition,
 } from './states';
 import type { GuardState, TransitionInput } from './states';
 
-/** A grid cell, integer-indexed. */
-export interface Cell {
-  readonly x: number;
-  readonly z: number;
-}
-
-/** A continuous position on the grid, in cell units. */
-export interface Point {
-  readonly x: number;
-  readonly z: number;
-}
+// The record and its constructors live in `./guard`; re-exported here so a
+// caller has one import for the whole guard surface.
+export { createGuard, damageGuard, traceGuard } from './guard';
+export type { Cell, CreateGuardOptions, Guard, Point } from './guard';
 
 /** A path A* found: adjacent cells from just after the start to the goal. */
 export interface PathFound {
@@ -71,45 +66,6 @@ export interface GuardWorld {
   findPath(from: Cell, to: Cell): PathResult;
 }
 
-export interface Guard {
-  readonly id: string;
-  readonly state: GuardState;
-  /** Position in cell units; a guard stands at a cell's centre, e.g. 4.5. */
-  readonly x: number;
-  readonly z: number;
-  /** Facing yaw in radians, three.js convention: at 0 the guard faces -Z. */
-  readonly facing: number;
-  readonly health: number;
-  /** The tick this record was last stepped to; -1 before the first step. */
-  readonly tick: number;
-  readonly stateEnteredTick: number;
-  readonly ticksInState: number;
-  /** The heading the idle patrol script is currently turning toward. */
-  readonly patrolHeading: number;
-  /** The last cell the player was seen in, or null if never seen (US1-S3). */
-  readonly lastKnownPlayer: Cell | null;
-  readonly lastKnownTick: number;
-  readonly cooldownTicks: number;
-  readonly windupTicks: number;
-  /** Whether a shot is wound up and not yet released; cancelled by death. */
-  readonly pendingShot: boolean;
-  readonly shotsFired: number;
-  readonly path: readonly Cell[];
-  readonly pathRequestTick: number;
-  /** False once a path request came back unreachable (Edge Cases, FR-011). */
-  readonly pathable: boolean;
-  /** Whether this step drew from the PRNG — the seed only matters where true. */
-  readonly randomConsumed: boolean;
-}
-
-export interface CreateGuardOptions {
-  readonly id: string;
-  readonly x: number;
-  readonly z: number;
-  readonly facing?: number;
-  readonly health?: number;
-}
-
 export interface StepContext {
   readonly tick: number;
   readonly rng: Rng;
@@ -120,40 +76,6 @@ export interface StepContext {
   readonly world: GuardWorld;
   /** Damage delivered to this guard on this tick, if any. */
   readonly damage?: number;
-}
-
-export function createGuard(options: CreateGuardOptions): Guard {
-  return {
-    id: options.id,
-    state: GUARD_SPAWN_STATE,
-    x: options.x,
-    z: options.z,
-    facing: options.facing ?? 0,
-    health: options.health ?? GUARD_MAX_HEALTH,
-    tick: -1,
-    stateEnteredTick: 0,
-    ticksInState: 0,
-    patrolHeading: options.facing ?? 0,
-    lastKnownPlayer: null,
-    lastKnownTick: -1,
-    cooldownTicks: 0,
-    windupTicks: 0,
-    pendingShot: false,
-    shotsFired: 0,
-    path: [],
-    pathRequestTick: -Infinity,
-    pathable: true,
-    randomConsumed: false,
-  };
-}
-
-/** One line of the recorded state trace (US1-S9). Stable field order by design. */
-export function traceGuard(guard: Guard): string {
-  return (
-    `${guard.tick} ${guard.state} f=${guard.facing.toFixed(6)}` +
-    ` p=${guard.x.toFixed(4)},${guard.z.toFixed(4)}` +
-    ` hp=${guard.health} cd=${guard.cooldownTicks} shots=${guard.shotsFired}`
-  );
 }
 
 /** The yaw that looks from `from` toward `to`; unchanged when they coincide. */
@@ -213,13 +135,6 @@ function patrol(guard: Guard, tick: number, rng: Rng): { facing: number; heading
   return { facing: wrapYaw(guard.facing + turn + jitter), heading };
 }
 
-/** Applies damage without transitioning: the table alone decides state (US1-S7).
- *  A guard already in `death` absorbs nothing, so no second death can fire. */
-export function damageGuard(guard: Guard, amount: number): Guard {
-  if (guard.state === 'death') return guard;
-  return { ...guard, health: Math.max(0, guard.health - amount) };
-}
-
 function transitionInput(
   guard: Guard,
   context: StepContext,
@@ -246,9 +161,15 @@ function onEnter(guard: Guard, state: GuardState, tick: number): Guard {
   const entered: Guard = { ...guard, state, stateEnteredTick: tick, ticksInState: 0 };
   switch (state) {
     case 'idle':
-      return { ...entered, patrolHeading: entered.facing, path: [], pathable: true };
+      return {
+        ...entered,
+        patrolHeading: entered.facing,
+        path: [],
+        pathGoal: null,
+        pathable: true,
+      };
     case 'chase':
-      return { ...entered, path: [], pathRequestTick: -Infinity };
+      return { ...entered, path: [], pathGoal: null, pathRequestTick: -Infinity };
     case 'attack':
       return {
         ...entered,
@@ -259,7 +180,14 @@ function onEnter(guard: Guard, state: GuardState, tick: number): Guard {
     case 'death':
       // The pending shot is cancelled here, so no damage is dealt after death is
       // entered (US1-S7, Edge Cases).
-      return { ...entered, cooldownTicks: 0, windupTicks: 0, pendingShot: false, path: [] };
+      return {
+        ...entered,
+        cooldownTicks: 0,
+        windupTicks: 0,
+        pendingShot: false,
+        path: [],
+        pathGoal: null,
+      };
     default:
       return entered;
   }
@@ -329,5 +257,81 @@ function act(guard: Guard, context: StepContext, hasLineOfSight: boolean): Guard
     return { ...base, facing, x, z };
   }
 
-  return { ...base, facing };
+  if (base.state === 'chase') return chase({ ...base, facing }, context);
+  return attack({ ...base, facing }, hasLineOfSight);
+}
+
+/** True when `a` and `b` name the same cell, either or both possibly absent. */
+function sameCell(a: Cell | null, b: Cell | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.x === b.x && a.z === b.z;
+}
+
+/**
+ * Chase: follow a path the injected world returned, refreshing it no more often
+ * than `PATH_REQUEST_INTERVAL_TICKS` (the declared per-guard throttle). A guard
+ * moves only along a path — never straight at the player — so a stale path that
+ * has been discarded leaves it standing rather than walking somewhere wrong.
+ */
+function chase(guard: Guard, context: StepContext): Guard {
+  const goal = guard.lastKnownPlayer;
+  // The player moved to another cell: the path in hand leads to the old one, so
+  // it is dropped on this tick rather than followed to it (Edge Cases).
+  const stale = !sameCell(goal, guard.pathGoal);
+  const path = stale ? [] : guard.path;
+  const due = context.tick - guard.pathRequestTick >= PATH_REQUEST_INTERVAL_TICKS;
+
+  let current: Guard = { ...guard, path, pathGoal: goal };
+  if (goal !== null && due) {
+    const result = context.world.findPath({ x: Math.floor(guard.x), z: Math.floor(guard.z) }, goal);
+    current = {
+      ...current,
+      pathRequestTick: context.tick,
+      pathable: !isUnreachable(result),
+      path: isUnreachable(result) ? [] : result.cells,
+    };
+  }
+
+  const next = current.path[0];
+  if (next === undefined) return current;
+  const { x, z } = moveToward(current, cellCentre(next), context);
+  const arrived = distance({ x, z }, cellCentre(next)) <= PATH_NODE_ARRIVAL_CELLS;
+  return { ...current, x, z, path: arrived ? current.path.slice(1) : current.path };
+}
+
+/**
+ * Attack: hold position, serve the shot cooldown one tick at a time, and release
+ * the wound-up shot when its wind-up expires. The cooldown is not counted on the
+ * tick the state is entered — that tick *is* the arming — and it is the cooldown
+ * running out that lets the table return the guard to chase (US1-S6).
+ */
+function attack(guard: Guard, hasLineOfSight: boolean): Guard {
+  if (guard.ticksInState === 0) return guard;
+
+  // Sight broken mid-wind-up: the shot is never emitted (US3-S5).
+  if (!hasLineOfSight && guard.pendingShot) {
+    return { ...guard, pendingShot: false, cooldownTicks: Math.max(0, guard.cooldownTicks - 1) };
+  }
+
+  if (guard.cooldownTicks <= 0) {
+    // Still in contact and off cooldown: wind up the next shot.
+    return {
+      ...guard,
+      cooldownTicks: SHOT_COOLDOWN_TICKS,
+      windupTicks: ATTACK_WINDUP_TICKS,
+      pendingShot: true,
+    };
+  }
+
+  const cooldownTicks = guard.cooldownTicks - 1;
+  if (!guard.pendingShot) return { ...guard, cooldownTicks };
+  const windupTicks = guard.windupTicks - 1;
+  if (windupTicks > 0) return { ...guard, cooldownTicks, windupTicks };
+  return {
+    ...guard,
+    cooldownTicks,
+    windupTicks: 0,
+    pendingShot: false,
+    shotsFired: guard.shotsFired + 1,
+  };
 }
