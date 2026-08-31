@@ -24,8 +24,15 @@ runtime: bwrap
 # drives the BUILT page, so a build failure has to fail the same gate the smoke
 # run reports on. Compiling is not passing.
 gates:
-  typecheck: "npm run typecheck"
-  test: "npm run build && npm run test && npm run smoke"
+  # A node worktree is a fresh checkout: it has package.json and no node_modules,
+  # so `npm run typecheck` resolves `tsc` against a bin directory that does not
+  # exist and exits 127 in 0.16s. That is not a code failure, but the ladder
+  # charges it to the node's attempt budget -- on 2026-08-30 it burned four
+  # attempts in seven seconds on 006-enemies/us2 and escalated to a KILL that
+  # took three pending siblings with it. Install first, and only when missing,
+  # so a worktree the agent already prepared is not reinstalled on every gate.
+  typecheck: "([ -x node_modules/.bin/tsc ] || npm ci --no-audit --no-fund) && npm run typecheck"
+  test: "([ -x node_modules/.bin/tsc ] || npm ci --no-audit --no-fund) && npm run build && npm run test && npm run smoke"
 
 # The document every agent attempt is told to read and obey.
 standards: .specify/memory/constitution.md
