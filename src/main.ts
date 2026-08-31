@@ -11,6 +11,7 @@ import { createSceneShell, resizeCamera } from './scene/empty';
 import { createDiagnostics } from './diag/diag';
 import { installErrorHandlers } from './diag/handlers';
 import { collectSystems, type GameContext } from './boot/registry';
+import { renderFrame } from './post/render-hook';
 import './boot/discover';
 import type { WebGLRenderer } from 'three/src/renderers/WebGLRenderer.js';
 import type WebGPURenderer from 'three/src/renderers/webgpu/WebGPURenderer.js';
@@ -124,7 +125,9 @@ async function run() {
       system.update?.(ctx, delta);
     }
 
-    renderer.render(shell.scene, shell.camera);
+    // The frame's one render call, indirected exactly once: a passthrough to
+    // `renderer.render` until US4's post chain installs itself (FR-015).
+    renderFrame(ctx);
 
     requestAnimationFrame(frame);
   }
