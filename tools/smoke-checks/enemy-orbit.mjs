@@ -1,27 +1,20 @@
 // The orbit smoke check (T036, FR-010, US4-S4, US4-S7, US4-S8, SC-005): the
 // billboard half of US4, asserted in a real browser because none of it exists
-// outside one.
+// outside one. The camera is stood at eight evenly spaced bearings around one
+// guard and `__diag.enemies[i].viewAngle` is read at each: eight readings,
+// pairwise distinct, no two consecutive alike. Then the billboards' draw calls
+// are measured by hiding them from one fixed pose and differencing, so the
+// level's geometry cancels out — and again with the camera turned away, where
+// the difference must be nothing at all.
 //
-// Three claims, in the order they are made. The camera is stood at eight evenly
-// spaced bearings around one guard and `__diag.enemies[i].viewAngle` is read at
-// each: eight readings, pairwise distinct, no two consecutive alike. The draw
-// calls the billboards cost are measured by hiding them from one fixed camera
-// pose and differencing, so the level's own geometry cancels out and what is
-// left is the guards. And the same difference is taken with the camera turned to
-// face away, where it must be nothing at all.
-//
-// The eight readings are taken inside one `page.evaluate` with no frame between
-// them. That is not a convenience: no frame means no tick, so the guard really
-// is stationary for the whole orbit, which is the premise US4-S4 states. The
-// orbit itself moves only the camera -- an alerted guard turns to face the
-// player every tick, so orbiting by teleporting the *player* would circle a
-// guard that pivots to keep its front to the viewer and could never show eight
-// columns.
+// The readings are taken inside one `page.evaluate` with no frame between them:
+// no frame means no tick, so the guard really is stationary for the whole orbit,
+// which is the premise US4-S4 states.
 
 export const name = 'enemy-orbit';
 
-/** The declared column count, mirrored from `src/enemy/view-angle.ts`: the gate
- *  asserts the requirement, not whatever constant the code happens to hold. */
+/** Mirrored from `src/enemy/view-angle.ts`: the gate asserts the requirement,
+ *  not whatever constant the code happens to hold. */
 const VIEW_ANGLES = 8;
 
 export default async function check({ page }) {
@@ -34,11 +27,11 @@ export default async function check({ page }) {
   }));
 
   if (!ready.harness) {
-    errors.push('window.__enemySprites.orbit is missing: the billboard system published no camera seam');
+    errors.push('window.__enemySprites.orbit is missing: no camera seam was published');
     return errors;
   }
   if (ready.guards < 1) {
-    errors.push(`__diag.enemies holds ${ready.guards} guards, so there is nothing to orbit`);
+    errors.push(`__diag.enemies holds ${ready.guards} guards: nothing to orbit`);
     return errors;
   }
 
@@ -48,7 +41,7 @@ export default async function check({ page }) {
     errors.push('__diag.enemySprites was never published');
   } else {
     if (sprites.textures !== 1) {
-      errors.push(`__diag.enemySprites.textures is ${sprites.textures}, not the single sheet ${ready.guards} guards share`);
+      errors.push(`enemySprites.textures is ${sprites.textures}, not the one sheet ${ready.guards} guards share`);
     }
     if (sprites.billboards !== ready.guards) {
       errors.push(`${sprites.billboards} billboards were built for ${ready.guards} guards`);
@@ -57,13 +50,11 @@ export default async function check({ page }) {
     if (!Number.isInteger(cell) || cell <= 0) {
       errors.push(`sheet width ${sprites.sheetWidth} is not ${VIEW_ANGLES} whole cells wide`);
     } else if (!Number.isInteger(sprites.sheetHeight / cell) || sprites.sheetHeight < cell * 2) {
-      errors.push(
-        `sheet height ${sprites.sheetHeight} is not a whole number of ${cell}px frames`,
-      );
+      errors.push(`sheet height ${sprites.sheetHeight} is not a whole number of ${cell}px frames`);
     }
   }
 
-  // US4-S4: eight bearings, eight columns, taken with no frame between them so
+  // US4-S4: eight bearings, eight columns, with no frame between the readings so
   // the guard cannot have moved during the orbit.
   const orbit = await page.evaluate((steps) => {
     const readings = [];
@@ -77,9 +68,7 @@ export default async function check({ page }) {
   const reported = orbit.map((reading) => reading.reported);
   orbit.forEach((reading, step) => {
     if (reading.returned !== reading.reported) {
-      errors.push(
-        `orbit step ${step}: the billboard chose column ${reading.returned} but __diag.enemies[0].viewAngle says ${reading.reported}`,
-      );
+      errors.push(`orbit step ${step}: chose column ${reading.returned} but __diag says ${reading.reported}`);
     }
     if (!Number.isInteger(reading.reported) || reading.reported < 0 || reading.reported >= VIEW_ANGLES) {
       errors.push(`orbit step ${step}: viewAngle ${reading.reported} is not an integer in 0..${VIEW_ANGLES - 1}`);
@@ -94,39 +83,37 @@ export default async function check({ page }) {
       errors.push(`orbit steps ${step - 1} and ${step} both reported column ${reported[step]}`);
     }
   }
-  // The orbit closes: the last bearing is a step away from the first, not on it.
+  // The orbit closes: the last bearing is a step from the first, not on it.
   if (reported.length === VIEW_ANGLES && reported[VIEW_ANGLES - 1] === reported[0]) {
     errors.push('the orbit returned to its first column before it completed');
   }
 
-  // US4-S7's draw-call clause, measured rather than asserted from the code: the
-  // same camera pose is rendered with the billboards shown and hidden, so every
-  // wall in the frame cancels and the difference is the guards alone.
+  // US4-S7's draw-call clause, measured rather than read off the code: one pose
+  // rendered with the billboards shown and hidden, so every wall cancels and the
+  // difference is the guards alone. Then the same turned away, for US4-S8.
   const draws = await page.evaluate(async () => {
-    // Two frames: the first may already have been in flight when the camera
-    // moved, the second is drawn with it.
-    const settleFrames = () =>
+    // Two frames: the first may have been in flight when the camera moved.
+    const settle = () =>
       new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
     window.__enemySprites.orbit(0, 0);
-    await settleFrames();
+    await settle();
     const shown = window.__diag.drawCalls;
     const visibleShown = window.__diag.enemySprites.visible;
-    const flags = window.__enemySprites.visibleFlags();
 
     window.__enemySprites.setHidden(true);
-    await settleFrames();
+    await settle();
     const withoutBillboards = window.__diag.drawCalls;
     const visibleHidden = window.__diag.enemySprites.visible;
     window.__enemySprites.setHidden(false);
 
-    // US4-S8: turned to face away, the orbited guard is culled outright.
     window.__enemySprites.orbit(0, 0, { lookAway: true });
-    await settleFrames();
+    await settle();
     const awayFlags = window.__enemySprites.visibleFlags();
     const awayShown = window.__diag.drawCalls;
     const awayVisible = window.__diag.enemySprites.visible;
     window.__enemySprites.setHidden(true);
-    await settleFrames();
+    await settle();
     const awayHidden = window.__diag.drawCalls;
     window.__enemySprites.setHidden(false);
     window.__enemySprites.release();
@@ -136,7 +123,6 @@ export default async function check({ page }) {
       withoutBillboards,
       visibleShown,
       visibleHidden,
-      facingCount: flags.filter(Boolean).length,
       awayShown,
       awayHidden,
       awayVisible,
@@ -145,28 +131,23 @@ export default async function check({ page }) {
   });
 
   const cost = draws.shown - draws.withoutBillboards;
-  // The guards tick on while this is measured, so a guard may cross the camera's
-  // plane between the two readings; the larger count is the fair bound.
+  // Guards tick on while this is measured, so one may cross the camera's plane
+  // between readings; the larger count is the fair bound.
   const budget = Math.max(draws.visibleShown, draws.visibleHidden);
   if (cost > budget) {
-    errors.push(
-      `the billboards cost ${cost} draw calls for ${budget} visible guards, more than one each`,
-    );
+    errors.push(`the billboards cost ${cost} draw calls for ${budget} visible guards, over one each`);
   }
   if (draws.visibleShown < 1 || cost < 1) {
-    errors.push(
-      `no guard was drawn from the orbit pose: ${draws.visibleShown} visible, ${cost} draw calls`,
-    );
+    errors.push(`no guard drawn from the orbit pose: ${draws.visibleShown} visible, ${cost} draw calls`);
   }
 
+  // US4-S8: turned to face away, the orbited guard is culled outright.
   if (draws.awayFacesGuard !== false) {
     errors.push('the orbited guard was still counted visible with the camera turned away from it');
   }
   const awayCost = draws.awayShown - draws.awayHidden;
   if (awayCost > draws.awayVisible) {
-    errors.push(
-      `with the camera turned away the billboards still cost ${awayCost} draw calls for ${draws.awayVisible} visible guards`,
-    );
+    errors.push(`with the camera turned away the billboards still cost ${awayCost} draw calls`);
   }
 
   return errors;

@@ -1,10 +1,8 @@
 // T028 (FR-010, US4-S3): the bearing arithmetic that picks a sprite column.
 //
-// The whole of US4's "it never spins like a flat card" claim reduces to this
-// function being a *bijection* from eight evenly spaced viewer bearings onto
-// `0..7`. That is asserted directly here rather than inferred from pixels, and
-// index 0 is pinned to due north so the sheet's first column is the guard's
-// front and not an arbitrary corner.
+// US4's "it never spins like a flat card" reduces to this function being a
+// bijection from eight evenly spaced viewer bearings onto `0..7` — asserted
+// directly rather than inferred from pixels, with index 0 pinned to due north.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -31,12 +29,11 @@ describe('view-angle constants', () => {
 });
 
 describe('normalizeAngle', () => {
-  it('maps every angle into [0, 2*PI)', () => {
+  it('maps every angle into [0, 2*PI) without changing the direction', () => {
     for (const radians of [0, -0.001, -Math.PI, -7 * Math.PI, 2 * Math.PI, 9.5, -12.25]) {
       const normalized = normalizeAngle(radians);
       expect(normalized).toBeGreaterThanOrEqual(0);
       expect(normalized).toBeLessThan(2 * Math.PI);
-      // Same direction, just named in range.
       expect(Math.cos(normalized)).toBeCloseTo(Math.cos(radians), 10);
       expect(Math.sin(normalized)).toBeCloseTo(Math.sin(radians), 10);
     }
@@ -44,10 +41,9 @@ describe('normalizeAngle', () => {
 });
 
 describe('bearingBetween', () => {
-  // Bearing 0 is due north (-Z, the yaw a guard with facing 0 looks along) and a
-  // bearing `b` names the direction `(-sin b, -cos b)` — the convention
-  // `step.ts`'s `yawToward` and `camera.rotation.y` already use, so a bearing and
-  // a guard's facing can be subtracted from one another at all.
+  // Bearing 0 is due north and `b` names `(-sin b, -cos b)`: the convention
+  // `step.ts`'s `yawToward` and `camera.rotation.y` already use, so a bearing
+  // and a facing can be subtracted from one another at all.
   it('agrees with the yaw convention: north is zero, and yaw turns toward west', () => {
     const guard = { x: 5, z: 5 };
     expect(bearingBetween(guard, { x: 5, z: 3 })).toBeCloseTo(0, 12);
@@ -60,25 +56,18 @@ describe('bearingBetween', () => {
   // point sees that point at relative bearing 0, and so shows its front column.
   it('puts a guard that faces a point at column 0 from that point', () => {
     const guard = { x: 12, z: 20 };
-    for (const camera of [
-      { x: 12, z: 14 },
-      { x: 17, z: 20 },
-      { x: 8, z: 25 },
-      { x: 12.5, z: 20.5 },
-    ]) {
+    for (const camera of [{ x: 12, z: 14 }, { x: 17, z: 20 }, { x: 8, z: 25 }, { x: 12.5, z: 20.5 }]) {
       // `yawToward` in `step.ts` is `atan2(-dx, -dz)`: the same function.
       const facing = Math.atan2(-(camera.x - guard.x), -(camera.z - guard.z));
       expect(viewAngleIndex(facing, bearingBetween(guard, camera))).toBe(0);
     }
   });
 
-  it('is independent of distance', () => {
-    const near = bearingBetween({ x: 0, z: 0 }, { x: 1, z: -1 });
-    const far = bearingBetween({ x: 0, z: 0 }, { x: 40, z: -40 });
-    expect(near).toBeCloseTo(far, 12);
-  });
-
-  it('answers zero for a coincident point rather than NaN', () => {
+  it('is independent of distance, and answers zero for a coincident point', () => {
+    expect(bearingBetween({ x: 0, z: 0 }, { x: 1, z: -1 })).toBeCloseTo(
+      bearingBetween({ x: 0, z: 0 }, { x: 40, z: -40 }),
+      12,
+    );
     expect(bearingBetween({ x: 2, z: 2 }, { x: 2, z: 2 })).toBe(0);
   });
 });
@@ -88,11 +77,10 @@ describe('viewAngleIndex', () => {
     expect(viewAngleIndex(0, 0)).toBe(0);
   });
 
-  it('chooses index 0 anywhere inside the first column, either side of north', () => {
+  it('holds index 0 across the whole first column, and leaves it at the edges', () => {
     const halfColumn = VIEW_ANGLE_STEP_RADIANS / 2;
     expect(viewAngleIndex(0, halfColumn * 0.99)).toBe(0);
     expect(viewAngleIndex(0, -halfColumn * 0.99)).toBe(0);
-    // And leaves it at the boundary, in both directions.
     expect(viewAngleIndex(0, halfColumn * 1.01)).toBe(1);
     expect(viewAngleIndex(0, -halfColumn * 1.01)).toBe(7);
   });
@@ -103,7 +91,10 @@ describe('viewAngleIndex', () => {
     expect(new Set(indices).size).toBe(VIEW_ANGLE_COUNT);
   });
 
-  it('keeps the orbit distinct for a guard facing any direction', () => {
+  it('stays distinct and non-repeating however guard and viewer are turned', () => {
+    // A guard rotating under a fixed viewer changes column just as an orbiting
+    // viewer does: the index is the *relative* bearing either way.
+    expect(new Set(ORBIT.map((yaw) => viewAngleIndex(yaw, 0))).size).toBe(VIEW_ANGLE_COUNT);
     for (const guardYaw of [0, 0.3, 1, -2.2, Math.PI, 5.9, -7.7]) {
       const indices = ORBIT.map((bearing) => viewAngleIndex(guardYaw, guardYaw + bearing));
       expect(new Set(indices).size, `guardYaw=${guardYaw}`).toBe(VIEW_ANGLE_COUNT);
@@ -112,13 +103,7 @@ describe('viewAngleIndex', () => {
     }
   });
 
-  it('turns with the guard: a guard rotating under a fixed viewer changes column', () => {
-    const bearing = 0;
-    const indices = ORBIT.map((yaw) => viewAngleIndex(yaw, bearing));
-    expect(new Set(indices).size).toBe(VIEW_ANGLE_COUNT);
-  });
-
-  it('always answers an integer in 0..7, for any input at all', () => {
+  it('answers an integer in 0..7 for any input, stable under whole turns', () => {
     for (const yaw of [-100, -1.5, 0, 0.7, 33]) {
       for (const bearing of [-100, -3, 0, 2.5, 1000]) {
         const index = viewAngleIndex(yaw, bearing);
@@ -127,9 +112,6 @@ describe('viewAngleIndex', () => {
         expect(index).toBeLessThan(VIEW_ANGLE_COUNT);
       }
     }
-  });
-
-  it('is stable under whole turns added to either argument', () => {
     for (let k = 0; k < VIEW_ANGLE_COUNT; k += 1) {
       const bearing = k * VIEW_ANGLE_STEP_RADIANS + 0.11;
       expect(viewAngleIndex(0.4, bearing)).toBe(viewAngleIndex(0.4 + 4 * Math.PI, bearing));

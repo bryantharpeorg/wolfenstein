@@ -1,12 +1,9 @@
 // T029 (FR-009, US4-S2): the sprite sheet as a *plan* — dimensions and an
-// ordered draw program — with no canvas anywhere near it.
-//
-// This is the half of the generator a unit test can hold: `sprite-shape.ts` is
-// pure, so the declared geometry of the sheet (8 columns of view angles by
-// `frames` rows, the last of them the death frames) and the determinism of the
-// figure are asserted here, and `sprite-sheet.ts` is left as a replay loop the
-// smoke gate exercises in a real browser. Constitution II is re-checked at the
-// bottom: the sheet is drawn, never loaded.
+// ordered draw program — with no canvas anywhere near it. The declared geometry
+// (8 columns of view angles by `frames` rows, the last of them the death frames)
+// and the determinism of the figure are asserted here; `sprite-sheet.ts` is left
+// a replay loop the smoke gate exercises in a real browser. Constitution II is
+// re-checked at the bottom.
 
 import { describe, it, expect } from 'vitest';
 import { resolve } from 'node:path';
@@ -29,20 +26,14 @@ import {
 import type { DrawOp, SheetPlan } from '../../src/enemy/sprite-shape';
 import { expectPure } from './enemy-pure';
 
-/** The extent of one op in cell-local pixels, so "inside the cell" is checkable
+/** One op's bounding box `[x0, y0, x1, y1]`, so "inside the cell" is checkable
  *  without knowing which shape it is. */
-function extent(op: DrawOp): { x0: number; y0: number; x1: number; y1: number } {
-  switch (op.op) {
-    case 'rect':
-      return { x0: op.x, y0: op.y, x1: op.x + op.w, y1: op.y + op.h };
-    case 'ellipse':
-      return { x0: op.x - op.rx, y0: op.y - op.ry, x1: op.x + op.rx, y1: op.y + op.ry };
-    case 'polygon': {
-      const xs = op.points.map((p) => p.x);
-      const ys = op.points.map((p) => p.y);
-      return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
-    }
-  }
+function bounds(op: DrawOp): number[] {
+  if (op.op === 'rect') return [op.x, op.y, op.x + op.w, op.y + op.h];
+  if (op.op === 'ellipse') return [op.x - op.rx, op.y - op.ry, op.x + op.rx, op.y + op.ry];
+  const xs = op.points.map((p) => p.x);
+  const ys = op.points.map((p) => p.y);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
 const plan: SheetPlan = buildSheetPlan();
@@ -55,15 +46,13 @@ describe('sprite sheet plan dimensions (US4-S2)', () => {
     expect(DEATH_ANIMATION_MS).toBe(DEATH_FRAME_COUNT * DEATH_FRAME_MS);
   });
 
-  it('is 8 * cell wide and frames * cell tall', () => {
+  it('is 8 * cell wide and frames * cell tall, for the declared size and any other', () => {
     expect(plan.cell).toBe(SPRITE_CELL_PIXELS);
     expect(plan.angles).toBe(8);
     expect(plan.frames).toBe(SPRITE_FRAME_COUNT);
     expect(plan.width).toBe(8 * plan.cell);
     expect(plan.height).toBe(plan.frames * plan.cell);
-  });
 
-  it('honours a frame count and a cell size it is called with', () => {
     const small = buildSheetPlan({ frames: 6, cell: 32 });
     expect(small.frames).toBe(6);
     expect(small.width).toBe(8 * 32);
@@ -79,7 +68,7 @@ describe('sprite sheet plan dimensions (US4-S2)', () => {
 });
 
 describe('the draw program', () => {
-  it('emits one non-empty cell for every angle-and-frame pair', () => {
+  it('emits one non-empty in-cell program for every angle-and-frame pair', () => {
     expect(plan.cells.length).toBe(plan.angles * plan.frames);
     for (let frame = 0; frame < plan.frames; frame += 1) {
       for (let angle = 0; angle < plan.angles; angle += 1) {
@@ -89,34 +78,25 @@ describe('the draw program', () => {
         expect(cell.x).toBe(angle * plan.cell);
         expect(cell.y).toBe(frame * plan.cell);
         expect(cell.ops.length).toBeGreaterThan(0);
+        for (const op of cell.ops) {
+          const where = `${op.op} at angle ${angle} frame ${frame}`;
+          // Nothing bleeds into the neighbouring column or row.
+          for (const edge of bounds(op)) {
+            expect(edge, where).toBeGreaterThanOrEqual(0);
+            expect(edge, where).toBeLessThanOrEqual(plan.cell);
+          }
+          // A colour a canvas 2D context can take.
+          expect(op.color).toMatch(/^#[0-9a-f]{6}$/);
+        }
       }
     }
   });
 
   it('names the last rows as the death frames and the rest as walk frames', () => {
     for (const cell of plan.cells) {
-      const expected = cell.frame < plan.walkFrames ? 'walk' : 'death';
-      expect(cell.kind).toBe(expected);
+      expect(cell.kind).toBe(cell.frame < plan.walkFrames ? 'walk' : 'death');
     }
     expect(plan.cells.filter((c) => c.kind === 'death').length).toBe(plan.angles * DEATH_FRAME_COUNT);
-  });
-
-  it('draws every shape inside its own cell', () => {
-    for (const cell of plan.cells) {
-      for (const op of cell.ops) {
-        const box = extent(op);
-        expect(box.x0, `${op.op} at angle ${cell.angle} frame ${cell.frame}`).toBeGreaterThanOrEqual(0);
-        expect(box.y0).toBeGreaterThanOrEqual(0);
-        expect(box.x1).toBeLessThanOrEqual(plan.cell);
-        expect(box.y1).toBeLessThanOrEqual(plan.cell);
-      }
-    }
-  });
-
-  it('gives every op an opaque CSS colour a canvas 2D context can take', () => {
-    for (const cell of plan.cells) {
-      for (const op of cell.ops) expect(op.color).toMatch(/^#[0-9a-f]{6}$/);
-    }
   });
 
   it('draws a different figure for each of the eight view angles', () => {
@@ -126,14 +106,11 @@ describe('the draw program', () => {
     expect(rendered.size).toBe(plan.angles);
   });
 
-  it('moves between walk frames, so the guard is not a still image', () => {
-    const frames = new Set(
+  it('moves between walk frames and collapses through the death frames', () => {
+    const walk = new Set(
       Array.from({ length: plan.walkFrames }, (_, frame) => JSON.stringify(cellPlan(plan, 0, frame).ops)),
     );
-    expect(frames.size).toBe(plan.walkFrames);
-  });
-
-  it('collapses through the death frames, each one different from the last', () => {
+    expect(walk.size).toBe(plan.walkFrames);
     const deaths = new Set(
       Array.from({ length: plan.deathFrames }, (_, i) =>
         JSON.stringify(cellPlan(plan, 0, plan.walkFrames + i).ops),
@@ -163,9 +140,7 @@ describe('frame selection over time', () => {
     // Held, not wrapped, for as long as the corpse lies there (US4-S6).
     expect(deathFrameIndex(plan, DEATH_ANIMATION_MS)).toBe(last);
     expect(deathFrameIndex(plan, DEATH_ANIMATION_MS * 100)).toBe(last);
-  });
-
-  it('never steps backwards as the death clock runs', () => {
+    // And never stepping backwards on the way.
     let previous = -1;
     for (let ms = 0; ms <= DEATH_ANIMATION_MS * 2; ms += 10) {
       const frame = deathFrameIndex(plan, ms);
@@ -193,9 +168,7 @@ describe('the sheet is drawn, not loaded (US4-S2, Constitution II)', () => {
 
   it('finds no image file at any path in the repository', () => {
     const root = resolve(__dirname, '../..');
-    const findings = walkAndReport(root).filter((finding) =>
-      /\.(png|jpe?g|gif|webp)$/i.test(finding),
-    );
+    const findings = walkAndReport(root).filter((finding) => /\.(png|jpe?g|gif|webp)$/i.test(finding));
     expect(findings).toEqual([]);
   });
 });

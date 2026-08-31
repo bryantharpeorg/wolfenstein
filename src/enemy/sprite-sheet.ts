@@ -1,12 +1,7 @@
 // The replay: `sprite-shape.ts`'s draw program onto one real canvas, uploaded as
-// one texture (FR-009, US4-S2, US4-S7). Everything decidable was decided in the
-// plan; this file owns exactly two facts the plan cannot hold — that a canvas
-// exists, and that there is *one* of it.
-//
-// The sheet is cached per guard *type*, never per instance. Ten guards share one
-// canvas, one texture and one upload; a hundred would too. That is the whole of
-// US4-S7's texture clause, and it is a property of this map rather than of any
-// caller's discipline.
+// one texture (FR-009, US4-S2, US4-S7). This file owns the two facts the plan
+// cannot hold — that a canvas exists, and that there is *one* per guard type, so
+// ten guards share one canvas, one texture and one upload.
 
 import { CanvasTexture, NearestFilter, SRGBColorSpace } from 'three';
 import type { Texture } from 'three';
@@ -24,8 +19,8 @@ export interface GuardSheet {
   readonly texture: Texture;
 }
 
-/** Replays one cell's program. Ops are cell-local, so the origin is a translate
- *  and the shapes are drawn exactly as the plan wrote them. */
+/** Replays one cell's program; ops are cell-local, so the origin is a
+ *  translate. */
 function drawOps(context: CanvasRenderingContext2D, ops: readonly DrawOp[]): void {
   for (const op of ops) {
     context.fillStyle = op.color;
@@ -52,15 +47,9 @@ function drawOps(context: CanvasRenderingContext2D, ops: readonly DrawOp[]): voi
   }
 }
 
-/**
- * Draws the whole plan onto a context. Exported so a caller with its own canvas
- * — a test page, a future editor — can replay the same program; the sheet the
- * game runs on is the cached one below.
- *
- * The canvas is cleared first and never filled: the background stays fully
- * transparent, which is what lets the billboard's alpha test cut the figure out
- * of its cell instead of hanging a grey card in the level.
- */
+/** Draws the whole plan onto a context. Cleared and never filled: the background
+ *  stays transparent, which is what lets the billboard's alpha test cut the
+ *  figure out of its cell instead of hanging a grey card in the level. */
 export function drawSheet(context: CanvasRenderingContext2D, plan: SheetPlan): void {
   context.clearRect(0, 0, plan.width, plan.height);
   for (const cell of plan.cells) {
@@ -85,8 +74,8 @@ function buildSheet(type: string, options: SheetPlanOptions): GuardSheet {
   drawSheet(context, plan);
 
   const texture = new CanvasTexture(canvas);
-  // Nearest with no mipmaps: the figure is drawn at sprite scale and should stay
-  // crisp rather than blur into the wall behind it as the player backs away.
+  // Nearest, no mipmaps: the figure stays crisp rather than blurring into the
+  // wall behind it as the player backs away.
   texture.magFilter = NearestFilter;
   texture.minFilter = NearestFilter;
   texture.generateMipmaps = false;
@@ -96,11 +85,9 @@ function buildSheet(type: string, options: SheetPlanOptions): GuardSheet {
   return { type, plan, canvas, texture };
 }
 
-/**
- * The sheet for a guard type, drawn on first ask and shared thereafter — so the
- * count of canvases and of textures is the count of guard *types*, whatever the
- * guard count is (US4-S2, US4-S7, Edge Cases).
- */
+/** The sheet for a guard type, drawn on first ask and shared thereafter — so the
+ *  count of canvases, and of textures, is the count of guard *types* whatever
+ *  the guard count is (US4-S2, US4-S7, Edge Cases). */
 export function guardSpriteSheet(type: string = GUARD_TYPE, options: SheetPlanOptions = {}): GuardSheet {
   const existing = sheets.get(type);
   if (existing != null) return existing;
@@ -109,16 +96,8 @@ export function guardSpriteSheet(type: string = GUARD_TYPE, options: SheetPlanOp
   return sheet;
 }
 
-/** How many sheets — and so how many textures — have been uploaded. Published
- *  through the billboard system's diagnostics so US4-S7 is checkable from the
- *  smoke gate rather than inferred from the code. */
+/** How many sheets, and so textures, have been uploaded — published through the
+ *  billboard system so US4-S7 is checkable from the smoke gate. */
 export function guardSheetCount(): number {
   return sheets.size;
-}
-
-/** Test seam only. Production code never drops a sheet: the texture lives as
- *  long as the page does. */
-export function resetGuardSheetsForTest(): void {
-  for (const sheet of sheets.values()) sheet.texture.dispose();
-  sheets.clear();
 }
