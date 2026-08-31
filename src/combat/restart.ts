@@ -1,29 +1,24 @@
-// The restart command (FR-011): a registry of resettables, the reset, the
-// snapshot it is judged by, and the exempt set SC-002 names. Pure, and — the
-// point of the file — with no knowledge of what the state it resets *is*: FR-011
-// spans doors and secrets (004), guards (006), the player spawn (002/003) and
-// this spec's own vitals, ammo and score, so each story registers its own reset
-// instead. The command is *serviced* once per frame rather than run on arrival,
-// which makes two presses one restart (Edge Cases).
+// The restart command (FR-011): a registry of resettables, the reset, the snapshot
+// it is judged by, and the exempt set SC-002 names. Pure, and — the point of the file
+// — with no knowledge of what it resets: FR-011 spans 004's doors and secrets, 006's
+// guards, 002/003's spawn and this spec's own vitals, ammo and score, so each story
+// registers its own. The command is *serviced* once per frame rather than run on
+// arrival, making two presses one restart (Edge Cases).
 
 import type { Diagnostics } from '../diag/diag';
 
-/** A story's own reset: whatever state it closes over is the state it owns. */
 export type Resettable = () => void;
 
-/** The fields SC-002 permits to differ across a restart: the session counters,
- *  which belong to the session and not to a run. One constant, so `008` adds
- *  `completions` here rather than at every comparison site, and US4's smoke
- *  assertion reads it rather than restating it (Assumptions, FR-019). */
+/** The fields SC-002 permits to differ across a restart: the session counters. One
+ *  constant, so `008` adds `completions` here, not at every comparison site. */
 export const RESTART_EXEMPT_FIELDS: readonly string[] = [
   'combat.deaths',
   'combat.restarts',
-  // Not a `__diag` field yet: the harness measures elapsed wall-clock itself,
-  // named here so the declared set is complete.
+  // Not a `__diag` field yet: the harness measures elapsed wall-clock itself.
   'elapsedMs',
 ];
 
-/** What one reset did. `failed` names any resettable that threw. */
+/** `failed` names any resettable that threw. */
 export interface ResetOutcome {
   readonly performed: boolean;
   readonly restarts: number;
@@ -36,24 +31,23 @@ let restarts = 0;
 let resetting = false;
 let requested = false;
 
-/** Registers `reset` under `name`, replacing any previous one: a system may
- *  register on every setup, and two copies is one reset run twice. */
+/** Replaces any previous reset of that name: a system may register on every setup,
+ *  and two copies is one reset run twice. */
 export function registerResettable(name: string, reset: Resettable): void {
   resettables.set(name, reset);
 }
 
-/** The registered names, in registration order. */
 export function registeredResettables(): readonly string[] {
   return [...resettables.keys()];
 }
 
-/** The session restart counter (FR-018), survived by never being reset. */
+/** Survived by never being reset (FR-018). */
 export function restartCount(): number {
   return restarts;
 }
 
 /** Runs every registered reset once (FR-011). Re-entrant calls are refused, not
- *  queued: a reset running mid-reset would re-run what is already done. */
+ *  queued: a reset mid-reset would re-run what is done. */
 export function resetRun(): ResetOutcome {
   if (resetting) return { performed: false, restarts, failed: [] };
   resetting = true;
@@ -61,7 +55,7 @@ export function resetRun(): ResetOutcome {
   const failed: string[] = [];
   try {
     for (const [name, reset] of resettables) {
-      // One broken reset must not strand the rest of the run half-reset.
+      // One broken reset must not strand the rest half-reset.
       try {
         reset();
       } catch {
@@ -76,8 +70,8 @@ export function resetRun(): ResetOutcome {
   return { performed: true, restarts, failed };
 }
 
-/** The restart *command*: issuable dead or alive alike (US2-S9), and coalescing,
- *  so two presses before the frame services them are one restart (Edge Cases). */
+/** Issuable dead or alive (US2-S9), and coalescing: two presses before the frame
+ *  services them are one restart (Edge Cases). */
 export function requestRestart(): void {
   requested = true;
 }
@@ -89,7 +83,7 @@ export function serviceRestart(): ResetOutcome {
   return resetRun();
 }
 
-/** Test seam only: production never unregisters or rewinds the counter. */
+/** Test seam only. */
 export function resetRestartForTest(): void {
   resettables.clear();
   restarts = 0;
@@ -99,19 +93,14 @@ export function resetRestartForTest(): void {
 
 export type SnapshotValue = string | number | boolean | null;
 
-/** A flat dotted field map, so SC-002's "field for field" comparison is a key
- *  walk and the exempt set is a list of names rather than a shape. */
+/** A flat dotted map, so SC-002's comparison is a key walk and the exempt set a
+ *  list of names rather than a shape. */
 export type RunSnapshot = Readonly<Record<string, SnapshotValue>>;
 
-/**
- * The comparable field set (US2-S8): health, ammo, active weapon, score, position,
- * facing, keys, doors open, secrets found, pickups, treasure and every guard's
- * state, plus the session counters — present so their exemption is a declaration
- * rather than an omission. Presentation is deliberately absent: `muzzleFlash` and
- * `hudReady` are US4's render facts, `pointerLocked` is the mouse, and `bobOffset`
- * is an oscillation a spawn teleport perturbs for one frame. None is state a
- * restart can leak.
- */
+/** The comparable field set (US2-S8): health, ammo, weapon, score, position,
+ *  facing, keys, doors, secrets, pickups, treasure and every guard's state, plus
+ *  the session counters, present so their exemption is a declaration rather than an
+ *  omission. Presentation is absent — none of it is state a restart can leak. */
 export function snapshotRunState(diag: Diagnostics): RunSnapshot {
   const snapshot: Record<string, SnapshotValue> = {};
 
@@ -162,7 +151,7 @@ export function snapshotRunState(diag: Diagnostics): RunSnapshot {
 
   snapshot['enemiesAlive'] = diag.enemiesAlive;
   snapshot['enemies.length'] = diag.enemies.length;
-  // Per guard, so "every guard is alive at its spawn tile in `idle`" is a
+  // Per guard, so US2-S7's "alive at its spawn tile in `idle`" is a
   // field-for-field claim, not a count a dead guard could satisfy.
   diag.enemies.forEach((r, i) => (snapshot[`enemies.${i}.state`] = r.state));
 
@@ -170,8 +159,7 @@ export function snapshotRunState(diag: Diagnostics): RunSnapshot {
 }
 
 /** The names on which two snapshots differ, ignoring `exempt` — sorted, so a
- *  failure cites the same field every run (FR-019). A field in one and not the
- *  other differs too: a missing field is the loudest leak. */
+ *  failure cites the same field every run. A missing field is the loudest leak. */
 export function diffSnapshots(
   before: RunSnapshot,
   after: RunSnapshot,

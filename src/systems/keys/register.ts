@@ -35,9 +35,8 @@ let pickups: KeyPickup[] = [];
 let interaction: InteractionDiagnostics | null = null;
 const meshes = new Map<KeyPickup, Mesh>();
 
-/** The handle 007's restart empties the inventory and puts the keys back on the
- *  floor through (007 FR-011); the reset itself is that spec's, not this
- *  file's. */
+/** The handle 007's restart empties the inventory through (007 FR-011); the
+ *  reset itself is that spec's. */
 export interface KeyRunState {
   readonly inventory: KeyInventory;
   readonly pickups: readonly KeyPickup[];

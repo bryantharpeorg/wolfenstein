@@ -29,7 +29,7 @@ let interaction: InteractionDiagnostics | null = null;
 const leaves = new Map<Door, Mesh>();
 
 /** The live doors, or null before setup. 007's restart shuts every one through
- *  this (007 FR-011); the reset itself is that spec's. */
+ *  this (007 FR-011). */
 export function getDoorField(): DoorField | null {
   return field;
 }

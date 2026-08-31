@@ -33,7 +33,7 @@ defineSystem({
     const state = getPlayerState();
 
     // The one gate every player command consults (007 FR-010): movement stops
-    // resolving on death, and a key held across it does not bank frames.
+    // resolving on death, and a key held across it banks no frames.
     if (!commandsResolve()) {
       state.desiredVelX = 0;
       state.desiredVelZ = 0;

@@ -1,34 +1,31 @@
-// The player's vitals: health, the one-way transition into `dead`, and the
-// session death counter (FR-009, FR-010). Pure, and with no knowledge of where a
-// shot came from — damage arrives as a number 006's falloff curve computed, which
-// this spec applies rather than recomputes.
-//
+// The player's vitals: health, the one-way transition into `dead`, and the session
+// death counter (FR-009, FR-010). Pure, and with no knowledge of where a shot came
+// from — damage arrives as a number 006's falloff computed, applied not recomputed.
 // `MAX_HEALTH` is declared here and nowhere else; `vitals.test.ts` scans every
-// `src/**/*.ts` for a second declaration. The transition is one-way by
-// construction: `applyDamage` refuses to spend health already gone, so a dead
-// player takes no further damage and counts no second death.
+// `src/**/*.ts` for a second declaration. The transition is one-way by construction:
+// `applyDamage` refuses to spend health already gone, so a dead player takes no
+// further damage and counts no second death.
 
-/** What the player spawns with, and what a restart returns them to. */
 export const MAX_HEALTH = 100;
 
-/** The floor damage clamps to (FR-009): health is never negative. */
+/** The floor damage clamps to (FR-009). */
 export const MIN_HEALTH = 0;
 
-/** The declared phases of a run; `dead` is the state FR-010 names. */
+/** `dead` is the state FR-010 names. */
 export const RUN_PHASES = ['alive', 'dead'] as const;
 
 export type RunPhase = (typeof RUN_PHASES)[number];
 
-/** A run's vitals. `deaths` is a *session* counter, deliberately not run state:
- *  `resetVitals` leaves it standing (US2-S8). */
+/** `deaths` is a *session* counter, not run state: `resetVitals` leaves it
+ *  standing (US2-S8). */
 export interface PlayerVitals {
   health: number;
   phase: RunPhase;
   deaths: number;
 }
 
-/** What one application of damage did. `applied` is what health actually lost,
- *  so an overkill reports what it took, not the shot's full value. */
+/** `applied` is what health actually lost, so an overkill reports what it took,
+ *  not the shot's full value. */
 export interface DamageReport {
   readonly applied: number;
   readonly health: number;
@@ -45,8 +42,7 @@ export function isDead(vitals: Readonly<PlayerVitals>): boolean {
 }
 
 /** Applies one guard shot's damage (FR-009, FR-010). A shot dealing nothing, a
- *  nonsense amount, or one arriving after death changes nothing — which is what
- *  makes the transition one-way. */
+ *  nonsense amount, or one after death changes nothing — the transition is one-way. */
 export function applyDamage(vitals: PlayerVitals, amount: number): DamageReport {
   const nothing: DamageReport = { applied: 0, health: vitals.health, died: false };
   if (!Number.isFinite(amount) || amount <= 0) return nothing;
@@ -63,7 +59,7 @@ export function applyDamage(vitals: PlayerVitals, amount: number): DamageReport 
   return { applied, health: vitals.health, died: true };
 }
 
-/** What restart calls: the run returns to spawn, the counter does not. */
+/** The run returns to spawn; the counter does not. */
 export function resetVitals(vitals: PlayerVitals): void {
   vitals.health = MAX_HEALTH;
   vitals.phase = 'alive';

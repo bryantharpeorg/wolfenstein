@@ -25,16 +25,16 @@ export function getEnemyWorld(): EnemyWorld | null {
 }
 
 /** What this frame's ticks did, so whichever spec owns player health applies the
- *  damage 006's attack module already computed rather than recomputing falloff
- *  (007 FR-009). Read by the vitals system at order 75. */
+ *  damage 006's attack module computed rather than recomputing falloff (007
+ *  FR-009). */
 export function getLastTickReport(): TickReport {
   return lastTick;
 }
 
-/** 007's restart (FR-011): the world is rebuilt rather than rewound, because the
- *  tick accumulator and the queued per-guard damage are its own — a rewind would
- *  land a pre-restart shot on a post-restart guard. The records come back in
- *  spawn order with the same ids, so US4's billboards keep their quads. */
+/** 007's restart (FR-011): the world is rebuilt rather than rewound — the tick
+ *  accumulator and queued damage are its own, and a rewind would land a
+ *  pre-restart shot on a post-restart guard. Records return in spawn order with
+ *  the same ids, so US4's billboards keep their quads. */
 export function resetEnemyRun(): void {
   if (context == null) return;
   world = createEnemyWorld();

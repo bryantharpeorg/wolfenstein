@@ -1,21 +1,15 @@
 /**
  * The vitals system (order 75): the render edge of US2. Every decision lives in
- * `src/combat/`; this file applies 006's already-computed damage, closes
- * `run-state.ts`'s gate the frame health reaches zero, presents the prompt, binds
- * restart dead or alive, and publishes `health`, `score`, `dead`, `deaths` and
- * `restarts` into `__diag.combat` (FR-009..FR-012). `src/main.ts` is not edited:
- * 001's glob discovery finds this file.
- *
- * Order 75 is after enemies (60), so this frame's shots are this frame's damage,
- * and after combat (70), so a guard the player killed is already counted in
- * `__diag.combat.kills`. That ordering resolves the simultaneous death: kills
- * score *before* damage applies, so a guard killed on the tick its shot killed
- * the player still scores, and the one-way transition counts that death once
- * (Edge Cases, US2-S5, US2-S10).
+ * `src/combat/`; this file applies 006's damage, closes `run-state.ts`'s gate the
+ * frame health reaches zero, presents the prompt, binds restart dead or alive, and
+ * publishes into `__diag.combat` (FR-009..FR-012). 001's glob discovery finds it, so
+ * `src/main.ts` is not edited. Order 75 is after enemies (60) and combat (70), which
+ * resolves the simultaneous death: kills score *before* damage applies, so a guard
+ * killed on the tick its shot killed the player still scores (US2-S5, S10).
  */
 import { defineSystem, type GameContext } from '../../boot/registry';
 import { ensureCombatDiag, type CombatDiagnostics } from '../../combat/combat-diag';
-import { installResetAdapters } from '../../combat/reset-adapters';
+import { installResetAdapters, syncPlayerDiag } from '../../combat/reset-adapters';
 import {
   RESTART_EXEMPT_FIELDS,
   registerResettable,
@@ -36,30 +30,25 @@ import {
 } from '../../combat/vitals';
 import { getLastTickReport } from '../enemies/register';
 
-/** Bound to restart (FR-011). Not a player *command*, so deliberately not behind
- *  the run-state gate death closes — that is what makes it issuable dead. */
+/** Not a player *command*, so not behind the gate death closes — which is what
+ *  makes restart issuable dead (FR-011). */
 export const RESTART_KEY_CODES = ['KeyR'] as const;
 
-/** The id the prompt element carries. */
 export const RESTART_PROMPT_ID = 'restart-prompt';
 
 const RESTART_PROMPT_TEXT = 'YOU DIED - press R to restart';
 
-/** The scripted-input seam, in the shape 003's `__playerDrive` established: an
- *  input for the smoke gate, not a gameplay path (FR-019). */
+/** The scripted-input seam, in the shape 003's `__playerDrive` established (FR-019). */
 export interface CombatHarness {
   /** Applies `amount` exactly as a resolved guard shot would, clamp and all. */
   damage(amount: number): number;
   /** Issued now, serviced at the top of the next frame. */
   restart(): void;
-  /** A DOM fact `__diag` has no field for; health, score and `dead` are read
-   *  from `__diag.combat` instead. */
+  /** A DOM fact `__diag` has no field for. */
   promptVisible(): boolean;
-  /** The first frame's snapshot and the one after the last completed reset, each
-   *  null until taken (US2-S8). */
+  /** The spawn snapshot and the one from the last completed reset (US2-S8). */
   firstFrame(): RunSnapshot | null;
   restartFrame(): RunSnapshot | null;
-  /** The exempt field names, read rather than restated (FR-019). */
   exempt(): readonly string[];
 }
 
@@ -75,23 +64,24 @@ let vitals: PlayerVitals | null = null;
 let score: ScoreState | null = null;
 let prompt: HTMLElement | null = null;
 
-/** Kills already scored, so one guard's death pays once (FR-012). */
+/** So one guard's death pays once (FR-012). */
 let scoredKills = 0;
 
 // SC-002's two readings, taken in the page rather than by a harness racing the
-// render loop: one frame after setup and one frame after a completed reset, so
-// each has seen the same simulation and a difference is a leak rather than a
-// timing artefact (US2-S8, FR-019).
+// render loop (US2-S8). Both at the same simulation age — zero: one at setup, one on
+// the frame the reset completed. Equal age is what makes a difference mean "the
+// restart leaked". "One frame" is not an age: guards step on a fixed 50ms
+// accumulator, so a frame is zero ticks when frames are quick and up to
+// `MAX_TICKS_PER_FRAME` when they are slow, and reading either a frame later would
+// fail on a slow machine over 006's behaviour rather than a leak.
 let firstSnapshot: RunSnapshot | null = null;
 let restartSnapshot: RunSnapshot | null = null;
-let captureNextFrame = false;
 
 function setPromptVisible(visible: boolean): void {
   if (prompt != null) prompt.style.display = visible ? 'block' : 'none';
 }
 
-/** Per Constitution II: no font file and no named system family. A prompt, not a
- *  measured readout — US4's HUD strokes its own glyphs. */
+/** Constitution II: no font file, no named system family. */
 function createPrompt(): HTMLElement {
   const element = document.createElement('div');
   element.id = RESTART_PROMPT_ID;
@@ -113,9 +103,8 @@ function publish(): void {
   combat.restarts = restartCount();
 }
 
-/** This story's own reset (FR-011): health, score, the gate and the prompt. The
- *  cross-spec state is `reset-adapters.ts`'s; the session counters are nobody's
- *  to clear (US2-S8). */
+/** This story's own reset (FR-011). Cross-spec state is `reset-adapters.ts`'s; the
+ *  session counters are nobody's to clear (US2-S8). */
 function resetVitalsRun(): void {
   if (vitals != null) resetVitals(vitals);
   if (score != null) resetScore(score);
@@ -125,8 +114,8 @@ function resetVitalsRun(): void {
   setPromptVisible(false);
 }
 
-/** Guards put down since the last frame, paid at the table's rate. Read from the
- *  published count, so this file holds no second opinion of what a kill is. */
+/** Guards put down since the last frame, at the table's rate — read from the
+ *  published count, so this file holds no second opinion of a kill. */
 function scoreKills(): void {
   if (combat == null || score == null) return;
   const killed = combat.kills - scoredKills;
@@ -135,8 +124,8 @@ function scoreKills(): void {
   addScore(score, SCORE_TABLE.guardKill * killed);
 }
 
-/** One frame's guard damage, from 006's tick report unchanged: the falloff was
- *  the attack module's to compute, never recomputed here (FR-009). */
+/** One frame's guard damage, from 006's tick report unchanged — the falloff was
+ *  the attack module's to compute (FR-009). */
 function takeGuardDamage(): void {
   if (vitals == null) return;
   const report = applyDamage(vitals, getLastTickReport().damageToPlayer);
@@ -153,7 +142,7 @@ function bindRestart(): void {
   window.addEventListener('keydown', (event: KeyboardEvent) => {
     if (!codes.has(event.code)) return;
     event.preventDefault();
-    // Coalesced by `restart.ts`: two presses are one reset (Edge Cases).
+    // Coalesced by `restart.ts`: two presses are one reset.
     requestRestart();
   });
 }
@@ -189,14 +178,21 @@ defineSystem({
     score = createScore();
     prompt = createPrompt();
 
-    // This story's own reset first, so the gate is open again before another
-    // spec's adapter reads anything that depends on it.
+    // This story's reset first, so the gate is open before another spec's adapter
+    // reads anything that depends on it.
     registerResettable('vitals', resetVitalsRun);
-    installResetAdapters();
+    installResetAdapters(ctx.diag);
 
     bindRestart();
     installHarness();
     publish();
+
+    // The spawn reading. 003 places the player in its setup (order 34) but
+    // publishes from `update()`, so `__diag.player` reads zeroes here; the sync a
+    // reset performs makes this the spawn values. Every other publisher sets up
+    // ahead of order 75.
+    syncPlayerDiag(ctx.diag);
+    firstSnapshot = snapshotRunState(ctx.diag);
   },
 
   update() {
@@ -206,19 +202,16 @@ defineSystem({
     // death lands before this frame's damage — of which there is none.
     const outcome = serviceRestart();
 
+    // Read immediately, while the reset is all that has touched the run this
+    // frame: every adapter republished its `__diag` fields as it reset them, so
+    // this is the whole run at its spawn values, unstepped.
+    if (outcome.performed) {
+      publish();
+      if (context != null) restartSnapshot = snapshotRunState(context.diag);
+    }
+
     scoreKills();
     takeGuardDamage();
     publish();
-
-    if (context == null) return;
-    const taken = snapshotRunState(context.diag);
-    firstSnapshot ??= taken;
-    if (captureNextFrame) {
-      restartSnapshot = taken;
-      captureNextFrame = false;
-    }
-    // Set after the capture, so a reset performed this frame is read on the
-    // next one.
-    if (outcome.performed) captureNextFrame = true;
   },
 });
