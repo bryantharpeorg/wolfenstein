@@ -73,9 +73,14 @@ function strokeLines(context: Ctx, strokes: readonly GlyphStroke[], color: strin
   context.stroke();
 }
 
-function drawText(context: Ctx, text: string, x: number, y: number, size: number, color: string): void {
+/** The one text renderer: strokes from `glyphs.ts` traced into a 2D context, at the one
+ *  weight every readout is drawn at. Exported because 008's stats screen draws through
+ *  it rather than growing a second one beside it (US4-S1, 008 US2-S5). */
+export function drawGlyphText(context: Ctx, text: string, x: number, y: number, size: number, color: string): void {
   strokeLines(context, layoutText(text, x, y, size), color, Math.max(1.5, size * STROKE_WEIGHT));
 }
+
+const drawText = drawGlyphText;
 
 /** One portrait, drawn from its recipe into its own canvas at load time (US4-S5). */
 function rasterisePortrait(index: number, width: number, height: number): HTMLCanvasElement {
