@@ -46,7 +46,10 @@ export const DEATH_PORTRAIT_INDEX = HEALTH_BANDS.length;
 export const PORTRAIT_COUNT = HEALTH_BANDS.length + 1;
 
 /** The band a health reading falls in, or null when there is none — which is
- *  exactly the case the death portrait covers. */
+ *  exactly the case the death portrait covers. The lowest rung is one point, so a
+ *  reading below it is shown as the death face deliberately: there is no living
+ *  portrait for a player with less than a point left, and the alternative is a
+ *  band whose whole width is a rounding error. */
 export function bandForHealth(health: number): HealthBand | null {
   if (!Number.isNaN(health)) {
     for (const band of HEALTH_BANDS) {

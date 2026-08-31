@@ -32,6 +32,7 @@ import {
   HUD_CANVAS_WIDTH,
   createHudSurface,
   drawHud,
+  type HudReadout,
   type HudSurface,
 } from '../../hud/compose';
 import {
@@ -103,15 +104,41 @@ function sourcesReady(ctx: GameContext): boolean {
   );
 }
 
+/**
+ * The scripted-reading seam, in the shape 003's `__playerDrive` and 006's
+ * `__enemySprites` established. What the HUD *displays* lives in a texture the
+ * harness cannot read back as text, so the values that texture was composited
+ * from are published here instead — US4-S2 and US4-S3 are claims about those
+ * values, and this is the only way to state them against the built page.
+ */
+export interface HudHarness {
+  /** The readout the current composite was drawn from. */
+  drawn(): HudReadout | null;
+  /** Composites that actually redrew the canvas, so a change can be shown to
+   *  have reached the texture rather than only the readout. */
+  composites(): number;
+}
+
+declare global {
+  interface Window {
+    __hud?: HudHarness;
+  }
+}
+
+let drawn: HudReadout | null = null;
+let composites = 0;
+
 /** What the HUD draws this frame, read from live state and held nowhere. */
-function readout(ctx: GameContext) {
+function readout(ctx: GameContext): HudReadout {
   const live = combat!;
   const keys = ctx.diag.interaction!.keys;
   return {
     health: live.health,
     weapon: live.weapon,
     ammo: live.ammo[live.weapon],
-    keys,
+    // By copy, not by reference: `drawn()` has to be what was *composited*, and a
+    // live handle would silently agree with every later change.
+    keys: { silver: keys.silver, gold: keys.gold },
     score: live.score,
     portraitIndex: portraitIndexForHealth(live.health),
   };
@@ -121,6 +148,7 @@ function readout(ctx: GameContext) {
 function resetHudRun(): void {
   resetFlash(flash);
   lastShotsFired = 0;
+  drawn = null;
   if (combat != null) combat.muzzleFlash = 0;
   viewModel?.setFireMotion(0);
 }
@@ -160,6 +188,8 @@ defineSystem({
     ctx.camera.add(viewModel.object);
 
     registerResettable('hud', resetHudRun);
+
+    window.__hud = { drawn: () => drawn, composites: () => composites };
   },
 
   update(ctx, deltaMs) {
@@ -180,7 +210,15 @@ defineSystem({
     }
 
     if (!sourcesReady(ctx)) return;
-    if (drawHud(surface!, readout(ctx)) && texture != null) texture.needsUpdate = true;
+
+    // Read afresh every frame and never kept: what the composite drew *is* the
+    // live state, which is the whole of US4-S3.
+    const values = readout(ctx);
+    if (drawHud(surface!, values)) {
+      composites += 1;
+      if (texture != null) texture.needsUpdate = true;
+    }
+    drawn = values;
 
     // Only now: the harness never reads a HUD that has not yet composited every
     // value it reports (Edge Cases).
