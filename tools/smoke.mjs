@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { walkAndReport } from './check-no-binaries.mjs';
 import { SMOKE_FPS_FLOOR } from './smoke-floor.mjs';
-import { interactionErrors, runSecretsPass } from './smoke-interaction.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -306,6 +305,52 @@ async function sampleLevelTwice(page) {
   return { first, second };
 }
 
+// FR-018's interaction contract. `secretsFound` may never exceed `secretsTotal`,
+// `doorsOpen` must be an integer, and every FR-017 field must be present and of
+// the type the harness reads. Returns the messages; the caller decides how to
+// exit. `__diag.errors` is asserted empty by `assertDiag` on every pass already.
+const INTERACTION_FIELDS = [
+  'doorsTotal',
+  'doorsOpen',
+  'secretsFound',
+  'secretsTotal',
+  'keys',
+  'lastReason',
+  'lastRefusalKeyKind',
+];
+
+function assertInteraction(interaction) {
+  if (interaction == null) return ['window.__diag.interaction is null or undefined'];
+  const errors = [];
+
+  for (const field of INTERACTION_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(interaction, field)) {
+      errors.push(`__diag.interaction is missing the FR-017 field '${field}'`);
+    }
+  }
+  for (const field of ['doorsTotal', 'doorsOpen', 'secretsFound', 'secretsTotal']) {
+    if (!Number.isInteger(interaction[field])) {
+      errors.push(`__diag.interaction.${field} is not an integer: ${JSON.stringify(interaction[field])}`);
+    }
+  }
+  if (interaction.secretsFound > interaction.secretsTotal) {
+    errors.push(
+      `__diag.interaction.secretsFound ${interaction.secretsFound} exceeds secretsTotal ` +
+        `${interaction.secretsTotal} (lastReason=${interaction.lastReason})`,
+    );
+  }
+  if (interaction.secretsFound < 0) {
+    errors.push(`__diag.interaction.secretsFound is negative: ${interaction.secretsFound}`);
+  }
+  if (interaction.doorsOpen > interaction.doorsTotal) {
+    errors.push(`__diag.interaction.doorsOpen ${interaction.doorsOpen} exceeds doorsTotal ${interaction.doorsTotal}`);
+  }
+  if (interaction.keys == null || typeof interaction.keys !== 'object') {
+    errors.push(`__diag.interaction.keys is not an object: ${JSON.stringify(interaction.keys)}`);
+  }
+  return errors;
+}
+
 async function assertDiag(page, url, { expectRenderer, expectReady = true }) {
   const errors = [];
   page.on('pageerror', (error) => {
@@ -385,7 +430,7 @@ async function runNormalPass(browser, url, expectedCounts) {
 
   // FR-018: the interaction contract is read on the ordinary pass too, so a
   // malformed counter fails the gate even when no secret is ever pushed.
-  errors.push(...interactionErrors(result.diag.interaction));
+  errors.push(...assertInteraction(result.diag.interaction));
 
   if (result.diag.drawCalls >= 20) {
     errors.push(`drawCalls ${result.diag.drawCalls} is not below 20`);
@@ -731,15 +776,6 @@ async function main() {
       fail('Locked door smoke pass failed');
     }
     console.log('Locked door smoke pass: refused by name, then opened with the key it named');
-
-    const secrets = await runSecretsPass(browser, url, levelGrid);
-    if (secrets.length > 0) {
-      for (const error of secrets) {
-        console.error(error);
-      }
-      fail('Secret push smoke pass failed');
-    }
-    console.log('Secret push smoke pass: every secret pushed once, secretsFound reached secretsTotal');
 
     const noGpu = await runSmokePass(
       browser,

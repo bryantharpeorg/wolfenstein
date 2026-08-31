@@ -1,7 +1,6 @@
 // One secret per `S` tile of 002's grid, plus the three questions only the whole
-// set can answer: which wall is the player pressing against, which way does it
-// retreat, and how many have been found (FR-012, FR-013). Pure; the grid arrives
-// as an argument, so a fixture grid is testable.
+// set can answer: which wall the player is pressing against, which way it retreats,
+// and how many have been found (FR-012, FR-013). Pure — the grid is an argument.
 
 import { LEVEL_GRID } from '../level';
 import type { InteractOutcome } from './outcomes';
@@ -20,10 +19,9 @@ import {
 } from './secret';
 import { setSecretCounts, type InteractionDiagnostics } from './interaction-diag';
 
-// The one field FR-017's set does not name, because only a blocked push has a
-// value for it (US3-S6). It is declared here, from US3's own file and by the same
-// augmentation `interaction-diag.ts` uses on 001's `Diagnostics`, so US1's module
-// is not reopened and the contract stays additive.
+// The one field FR-017's set does not name, because only a blocked push has a value
+// for it (US3-S6). Declared from US3's own file by the same augmentation
+// `interaction-diag.ts` uses on 001's `Diagnostics`, so US1's module is not reopened.
 declare module './interaction-diag' {
   interface InteractionDiagnostics {
     /** Tiles the last push could not travel; 0 when the path was clear. */
@@ -43,36 +41,27 @@ export interface SecretResolution {
   readonly remainingTiles: number;
 }
 
-function cellAt(grid: readonly string[], x: number, z: number): string {
-  return grid[z]?.[x] ?? ' ';
-}
+const cellAt = (grid: readonly string[], x: number, z: number): string => grid[z]?.[x] ?? ' ';
 
 /** Anything that is not open floor. Out of bounds counts, so a border secret is
  * boxed in rather than sliding off the map. */
-function isBlocking(cell: string): boolean {
-  return cell !== '0' && cell !== 'E';
-}
+const isBlocking = (cell: string): boolean => cell !== '0' && cell !== 'E';
 
-/** Whether a tile is open floor a player could stand on, and a wall could travel
- * into. Exported because FR-014's validator rule has to agree with the runtime
- * about what obstructs a push, not merely resemble it. */
+/** Open floor a wall may travel into. Exported so FR-014's validator rule agrees
+ * with the runtime about what obstructs a push rather than merely resembling it. */
 export function isSecretPathClear(grid: readonly string[], x: number, z: number): boolean {
   return !isBlocking(cellAt(grid, x, z));
 }
 
-// A secret sits in a one-tile-thick wall with solid tiles on exactly two opposite
-// sides — 002's validator already requires it of every `S` — so the wall's axis is
-// the one with the solid neighbours and the push axis is the other one. That is
-// the inverse of the door rule, and deliberately so: a door's leaf slides *into*
-// the wall it belongs to, a push-wall retreats *out of* it.
+// A secret sits in a one-tile-thick wall with solid tiles on two opposite sides —
+// 002's validator requires it of every `S` — so the wall's axis is the one with the
+// solid neighbours and the push axis is the other. The inverse of the door rule,
+// deliberately: a leaf slides *into* its wall, a push-wall retreats *out of* it.
 export function resolvePushAxis(grid: readonly string[], x: number, z: number): SecretAxis {
-  const solidAlongZ =
-    (isBlocking(cellAt(grid, x, z - 1)) ? 1 : 0) + (isBlocking(cellAt(grid, x, z + 1)) ? 1 : 0);
-  const solidAlongX =
-    (isBlocking(cellAt(grid, x - 1, z)) ? 1 : 0) + (isBlocking(cellAt(grid, x + 1, z)) ? 1 : 0);
-  if (solidAlongZ > solidAlongX) return 'x';
-  if (solidAlongX > solidAlongZ) return 'z';
-  return 'x';
+  const solid = (dx: number, dz: number): number => (isBlocking(cellAt(grid, x + dx, z + dz)) ? 1 : 0);
+  const alongZ = solid(0, -1) + solid(0, 1);
+  const alongX = solid(-1, 0) + solid(1, 0);
+  return alongX > alongZ ? 'z' : 'x';
 }
 
 export function buildSecretField(grid: readonly string[] = LEVEL_GRID): SecretField {
@@ -80,8 +69,7 @@ export function buildSecretField(grid: readonly string[] = LEVEL_GRID): SecretFi
   for (let z = 0; z < grid.length; z += 1) {
     const row = grid[z] ?? '';
     for (let x = 0; x < row.length; x += 1) {
-      if (row[x] !== 'S') continue;
-      secrets.push(createSecret({ x, z, axis: resolvePushAxis(grid, x, z) }));
+      if (row[x] === 'S') secrets.push(createSecret({ x, z, axis: resolvePushAxis(grid, x, z) }));
     }
   }
   return { grid, secrets };
@@ -92,7 +80,7 @@ export function secretAt(field: SecretField, x: number, z: number): Secret | nul
 }
 
 /** The nearest secret within reach — the player's tile or its four orthogonal
- * neighbours, the same reach US1 gives a door. Null is reported as `no-target`. */
+ * neighbours, US1's reach. Null is reported as `no-target`. */
 export function findTargetSecret(field: SecretField, playerX: number, playerZ: number): Secret | null {
   const tileX = Math.floor(playerX);
   const tileZ = Math.floor(playerZ);
@@ -111,8 +99,8 @@ export function findTargetSecret(field: SecretField, playerX: number, playerZ: n
   return best;
 }
 
-/** Away from the player: the sign of the wall's own offset from them along its
- * push axis. A player standing dead on the axis leaves the stored direction. */
+/** Away from the player: the sign of the wall's offset from them along its push
+ * axis. A player dead on the axis leaves the stored direction. */
 function directionAwayFrom(secret: Secret, playerX: number, playerZ: number): SecretDirection {
   const delta = secret.axis === 'x' ? secret.x + 0.5 - playerX : secret.z + 0.5 - playerZ;
   if (delta > 0) return 1;
@@ -121,8 +109,7 @@ function directionAwayFrom(secret: Secret, playerX: number, playerZ: number): Se
 }
 
 /** Whether the wall may travel into this tile: the grid decides, and so does any
- * other secret standing there, which is why the field owns this and `secret.ts`
- * does not (US3-S6). */
+ * other secret standing there — which is why the field owns this (US3-S6). */
 function pathBlocker(field: SecretField, moving: Secret): (tile: TileCoord) => boolean {
   return (tile) => {
     if (isBlocking(cellAt(field.grid, tile.x, tile.z))) return true;
@@ -155,42 +142,33 @@ export function stepSecrets(field: SecretField, deltaMs: number): void {
 }
 
 /** The origin tiles of fully opened secrets, for the passable-tile registry US1
- * created: once the wall has cleared its two tiles the opening is real, so 003's
- * collider reports the tile walkable and the player can step through (US3-S7). A
- * wall still in motion, or halted short, keeps filling its tile and is absent. */
+ * created: once the wall has cleared its two tiles 003's collider reports the tile
+ * walkable and the player can step through (US3-S7). A wall still in motion, or
+ * halted short, keeps filling its tile and is absent. */
 export function openSecretTiles(field: SecretField): string[] {
   return field.secrets.filter(isSecretOpen).map((secret) => tileKey(secret.x, secret.z));
 }
 
-/** Monotonic non-decreasing by construction: `found` is latched on the first push
- * that moves a wall and never cleared, so this counts distinct secrets and can
- * neither fall nor exceed `secretsTotal` (US3-S4, US3-S5). */
+/** Monotonic non-decreasing by construction: `found` latches on the first push that
+ * moves a wall, so this counts distinct secrets and can neither fall nor exceed
+ * `secretsTotal` (US3-S4, US3-S5). */
 export function secretsFound(field: SecretField): number {
-  let found = 0;
-  for (const secret of field.secrets) if (secret.found) found += 1;
-  return found;
+  return field.secrets.reduce((count, secret) => count + (secret.found ? 1 : 0), 0);
 }
 
 export function secretsTotal(field: SecretField): number {
   return field.secrets.length;
 }
 
-/** Writes the counters through US1's setter (FR-017). The bound is asserted here
- * rather than assumed, so a future change to `found` cannot publish a count the
- * smoke gate would have to catch. */
-export function publishSecretCounts(
-  interaction: InteractionDiagnostics,
-  field: SecretField,
-): void {
+/** Writes the counters through US1's setter (FR-017), enforcing the bound rather
+ * than assuming it, so no change to `found` can publish a count the gate must catch. */
+export function publishSecretCounts(interaction: InteractionDiagnostics, field: SecretField): void {
   const total = secretsTotal(field);
   setSecretCounts(interaction, Math.min(secretsFound(field), total), total);
 }
 
 /** Publishes the shortfall of the last push (FR-014, US3-S6). */
-export function setSecretRemainingTiles(
-  interaction: InteractionDiagnostics,
-  tiles: number,
-): void {
+export function setSecretRemainingTiles(interaction: InteractionDiagnostics, tiles: number): void {
   interaction.secretRemainingTiles = Math.max(0, Math.min(tiles, SECRET_TRAVEL_TILES));
 }
 

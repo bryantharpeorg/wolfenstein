@@ -1,41 +1,34 @@
 import { describe, it, expect } from 'vitest';
 import { validateLevel } from '../../src/level-validate';
 import { LEVEL_GRID, GRID_SIZE, PLAYER_SPAWN, ITEM_SPAWNS, DOOR_LOCKS } from '../../src/level';
-import { collectLevelRules, discoveredRuleModules, extraLevelErrors } from '../../src/interaction/level-rules';
+import {
+  collectLevelRules,
+  discoveredRuleModules,
+  extraLevelErrors,
+} from '../../src/interaction/level-rules';
 import { secretPlacementRule } from '../../src/interaction/rules/secret-placement';
 
-// A 64x64 fixture: an open room, one horizontal wall band at z=32, and a secret
-// in it. The band is thick enough on the south side to obstruct the push when the
-// test asks for it, so the only variable is the secret's travel path.
 const SPAWN = { x: 5, z: 5, yaw: 0 };
-
-function room(mutate: (grid: string[]) => void): string[] {
-  const grid: string[] = [];
-  for (let z = 0; z < GRID_SIZE; z += 1) {
-    let row = '';
-    for (let x = 0; x < GRID_SIZE; x += 1) {
-      row += x === 0 || x === GRID_SIZE - 1 || z === 0 || z === GRID_SIZE - 1 ? '1' : '0';
-    }
-    grid.push(row);
-  }
-  const put = (x: number, z: number, cell: string): void => {
-    const row = grid[z]!;
-    grid[z] = row.slice(0, x) + cell + row.slice(x + 1);
-  };
-  // The exit, so 002's own rules stay quiet and only this rule's errors remain.
-  put(50, 50, 'E');
-  // The one-tile-thick wall the secret sits in: solid on its two x neighbours.
-  put(9, 32, '1');
-  put(11, 32, '1');
-  put(10, 32, 'S');
-  mutate(grid);
-  return grid;
-}
 
 const put = (grid: string[], x: number, z: number, cell: string): void => {
   const row = grid[z]!;
   grid[z] = row.slice(0, x) + cell + row.slice(x + 1);
 };
+
+// A 64x64 fixture: an open room with a one-tile-thick wall band holding a secret at
+// (10,32), solid on its two x neighbours. The exit keeps 002's own rules quiet, so
+// only this rule's errors remain, and the one variable a case changes is the path.
+function room(mutate: (grid: string[]) => void): string[] {
+  const edge = (n: number) => n === 0 || n === GRID_SIZE - 1;
+  const grid = Array.from({ length: GRID_SIZE }, (_unused, z) =>
+    Array.from({ length: GRID_SIZE }, (_cell, x) => (edge(x) || edge(z) ? '1' : '0')).join(''),
+  );
+  for (const [x, z, cell] of [[50, 50, 'E'], [9, 32, '1'], [11, 32, '1'], [10, 32, 'S']] as const) {
+    put(grid, x, z, cell);
+  }
+  mutate(grid);
+  return grid;
+}
 
 const placementErrors = (grid: string[]) =>
   validateLevel(grid, {
@@ -102,9 +95,11 @@ describe('secret-placement rule (FR-014, US3-S6)', () => {
 });
 
 describe('the rule reaches validateLevel through the glob, not through an index', () => {
-  it('is discovered by the collector US2 created', () => {
+  it('is discovered by the collector US2 created, beside the rules it already had', () => {
     expect(discoveredRuleModules).toContain('./rules/secret-placement.ts');
+    expect(discoveredRuleModules).toContain('./rules/key-placement.ts');
     expect(collectLevelRules()).toContain(secretPlacementRule);
+    expect(collectLevelRules().length).toBeGreaterThanOrEqual(2);
   });
 
   it('contributes its errors through extraLevelErrors', () => {
@@ -116,10 +111,5 @@ describe('the rule reaches validateLevel through the glob, not through an index'
       doorLocks: {},
     }).filter((error) => error.category === 'secret-placement');
     expect(errors).toHaveLength(1);
-  });
-
-  it('leaves the rules US2 discovered in place beside it', () => {
-    expect(discoveredRuleModules).toContain('./rules/key-placement.ts');
-    expect(collectLevelRules().length).toBeGreaterThanOrEqual(2);
   });
 });

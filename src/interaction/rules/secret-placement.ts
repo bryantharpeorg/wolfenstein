@@ -20,18 +20,12 @@ declare module '../level-rules' {
 
 const DIRECTIONS: readonly SecretDirection[] = [1, -1];
 
-const step = (
-  x: number,
-  z: number,
-  axis: SecretAxis,
-  direction: SecretDirection,
-  steps: number,
-): { x: number; z: number } =>
+const step = (x: number, z: number, axis: SecretAxis, direction: SecretDirection, steps: number) =>
   axis === 'x' ? { x: x + steps * direction, z } : { x, z: z + steps * direction };
 
-/** How far a push from the opposite side would carry this wall before the path
- * obstructs it. Mirrors the runtime's own limit, using the runtime's own
- * predicate, so the validator and the push agree rather than merely resemble. */
+/** How far a push would carry this wall before the path obstructs it. Mirrors the
+ * runtime's own limit using the runtime's own predicate, so the validator and the
+ * push agree rather than merely resemble. */
 function travelLimit(
   grid: readonly string[],
   x: number,
@@ -59,55 +53,45 @@ function canPushFrom(
   return isSecretPathClear(grid, stand.x, stand.z);
 }
 
-function secretTiles(grid: readonly string[]): Array<{ x: number; z: number }> {
-  const tiles: Array<{ x: number; z: number }> = [];
-  for (let z = 0; z < grid.length; z += 1) {
-    const row = grid[z] ?? '';
-    for (let x = 0; x < row.length; x += 1) if (row[x] === 'S') tiles.push({ x, z });
-  }
-  return tiles;
-}
-
-export const secretPlacementRule: LevelRule = (context: LevelRuleContext): LevelError[] => {
-  const { grid } = context;
+export const secretPlacementRule: LevelRule = ({ grid }: LevelRuleContext): LevelError[] => {
   const errors: LevelError[] = [];
 
-  for (const tile of secretTiles(grid)) {
-    const axis = resolvePushAxis(grid, tile.x, tile.z);
-    const reachable = DIRECTIONS.filter((direction) =>
-      canPushFrom(grid, tile.x, tile.z, axis, direction),
-    );
+  for (let z = 0; z < grid.length; z += 1) {
+    const row = grid[z] ?? '';
+    for (let x = 0; x < row.length; x += 1) {
+      if (row[x] !== 'S') continue;
+      const axis = resolvePushAxis(grid, x, z);
+      const reachable = DIRECTIONS.filter((direction) => canPushFrom(grid, x, z, axis, direction));
 
-    if (reachable.length === 0) {
+      if (reachable.length === 0) {
+        errors.push({
+          category: 'secret-placement',
+          x,
+          z,
+          message:
+            `secret-placement: secret at (${x},${z}) cannot be pushed from either side of its ` +
+            `${axis} axis, so its ${SECRET_TRAVEL_TILES}-tile path can never clear`,
+        });
+        continue;
+      }
+
+      // One error per secret, naming the first approach whose path is short: two
+      // errors for one tile would be the same defect reported twice.
+      const short = reachable
+        .map((direction) => ({ direction, limit: travelLimit(grid, x, z, axis, direction) }))
+        .find((candidate) => candidate.limit < SECRET_TRAVEL_TILES);
+      if (short == null) continue;
+
       errors.push({
         category: 'secret-placement',
-        x: tile.x,
-        z: tile.z,
+        x,
+        z,
         message:
-          `secret-placement: secret at (${tile.x},${tile.z}) cannot be pushed from either ` +
-          `side of its ${axis} axis, so its ${SECRET_TRAVEL_TILES}-tile path can never clear`,
+          `secret-placement: secret at (${x},${z}) pushed along ` +
+          `${short.direction > 0 ? '+' : '-'}${axis} halts after ${short.limit} of ` +
+          `${SECRET_TRAVEL_TILES} tiles, ${SECRET_TRAVEL_TILES - short.limit} short of clearing`,
       });
-      continue;
     }
-
-    // One error per secret, naming the first approach whose path is short: two
-    // errors for one tile would be the same defect reported twice.
-    const blocked = reachable.find(
-      (direction) => travelLimit(grid, tile.x, tile.z, axis, direction) < SECRET_TRAVEL_TILES,
-    );
-    if (blocked == null) continue;
-
-    const limit = travelLimit(grid, tile.x, tile.z, axis, blocked);
-    errors.push({
-      category: 'secret-placement',
-      x: tile.x,
-      z: tile.z,
-      message:
-        `secret-placement: secret at (${tile.x},${tile.z}) pushed along ${
-          blocked > 0 ? '+' : '-'
-        }${axis} halts after ${limit} of ${SECRET_TRAVEL_TILES} tiles, ` +
-        `${SECRET_TRAVEL_TILES - limit} short of clearing`,
-    });
   }
 
   return errors;

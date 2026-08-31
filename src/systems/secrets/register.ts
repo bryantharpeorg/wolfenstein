@@ -1,19 +1,12 @@
 /**
  * The secrets system: the render and DOM edge of US3's push-wall. Every decision
- * lives in `src/interaction/` and is tested without a page; this file builds a
- * block per secret in the colour of the wall around it, steps them each frame,
- * drives the block's offset from the model's displacement, registers the opened
- * tiles with US1's passable-tile registry, and publishes the counters through the
- * interaction diagnostics setters (FR-012, FR-017, US3-S7).
- *
- * `src/main.ts` is not edited — 001's glob discovery finds this file — and
- * neither is the doors system nor `open-state.ts`: the opened tiles reach 003's
- * collider through the provider registry, which is what that seam is for.
- *
- * On FR-005: this installs a second *listener*, not a second command path. Both
- * key codes still resolve through the one table in `bindings.ts`, which is what
- * FR-005 binds; nothing here knows which key was pressed, and a secret is only
- * ever asked when the doors had no target of their own.
+ * lives in `src/interaction/` and is tested without a page; this file builds a block
+ * per secret, steps them each frame, drives the block's offset from displacement,
+ * registers the opened tiles with US1's passable-tile registry, and publishes the
+ * counters through the interaction diagnostics setters (FR-012, FR-017, US3-S7).
+ * `src/main.ts` is not edited: 001's glob discovery finds this file. On FR-005, this
+ * installs a second *listener*, not a second command path — both key codes still
+ * resolve through the one table in `bindings.ts`.
  */
 import { BoxGeometry, Mesh, MeshStandardMaterial, type Object3D } from 'three';
 import { defineSystem, type GameContext } from '../../boot/registry';
@@ -40,7 +33,6 @@ import { buildSecretShell, isSecretTileGeometry, secretWallColor } from './secre
 // The recess a slid-away wall reveals, in 002's flat colour: the inside of the
 // rock, never an imported texture (Constitution II).
 const SHELL_COLOR = 0x6f6f6f;
-
 const SECRET_HEIGHT = CEILING_Y - FLOOR_Y;
 
 let field: SecretField | null = null;
@@ -55,9 +47,8 @@ function blockPosition(secret: Secret): { x: number; z: number } {
   };
 }
 
-/** Hides the faces 002 emitted for the `S` tiles — the secret drawn as static
- * wall, which the moving block replaces. Only a merged group sitting at the
- * scene origin can be one of 002's, so a placed mesh is never mistaken for it. */
+/** Hides the faces 002 emitted for the `S` tiles, which the moving block replaces.
+ * Only a merged group at the scene origin can be one of 002's. */
 function hideStaticSecretFaces(scene: Object3D, secrets: readonly Secret[]): void {
   for (const child of scene.children) {
     if (!(child instanceof Mesh)) continue;
@@ -68,8 +59,8 @@ function hideStaticSecretFaces(scene: Object3D, secrets: readonly Secret[]): voi
 }
 
 function buildMeshes(ctx: GameContext, built: SecretField): void {
-  const shell = buildSecretShell(built.secrets);
   // One mesh for every recess in the level, so the shell is a single draw call.
+  const shell = buildSecretShell(built.secrets);
   if (shell != null) ctx.scene.add(new Mesh(shell, new MeshStandardMaterial({ color: SHELL_COLOR })));
 
   const geometry = new BoxGeometry(TILE_SIZE, SECRET_HEIGHT, TILE_SIZE);
@@ -91,9 +82,8 @@ function buildMeshes(ctx: GameContext, built: SecretField): void {
 
 defineSystem({
   name: 'secrets',
-  // After the doors system (45) and the keys system (46): the interaction
-  // diagnostics exist by the time this one writes the secret counters, and the
-  // doors have already answered the same press before a secret is asked.
+  // After doors (45) and keys (46): the interaction diagnostics exist by the time
+  // this writes the counters, and doors answer the press before a secret is asked.
   order: 47,
   setup(ctx) {
     const built = buildSecretField(LEVEL_GRID);
@@ -102,12 +92,11 @@ defineSystem({
     publishSecretCounts(interaction, built);
     setSecretRemainingTiles(interaction, 0);
 
-    // An opened secret stops blocking 003's collider, so the player can walk
-    // through the opening rather than see one they cannot enter (US3-S7).
+    // An opened secret stops blocking 003's collider, so the player can walk through
+    // the opening rather than see one they cannot enter (US3-S7).
     registerOpenTileProvider(() => openSecretTiles(built));
 
-    // Before buildMeshes, not after: the shell's own vertices lie on secret tiles
-    // and would match the same predicate.
+    // Before buildMeshes: the shell's vertices lie on secret tiles and would match.
     hideStaticSecretFaces(ctx.scene, built.secrets);
     buildMeshes(ctx, built);
 
@@ -122,8 +111,8 @@ defineSystem({
       );
       if (interaction == null || resolution.secret == null) return;
 
-      // Only a press that found a secret speaks for the level: otherwise the
-      // doors system's own answer — including its `no-target` — is the reason.
+      // Only a press that found a secret speaks for the level: otherwise the doors
+      // system's own answer — including its `no-target` — is the reason.
       recordOutcome(interaction, resolution.outcome);
       setSecretRemainingTiles(interaction, resolution.remainingTiles);
       publishSecretCounts(interaction, built);
@@ -131,7 +120,6 @@ defineSystem({
   },
   update(_ctx, deltaMs) {
     if (field == null || interaction == null) return;
-
     stepSecrets(field, deltaMs);
     for (const secret of field.secrets) {
       const mesh = blocks.get(secret);

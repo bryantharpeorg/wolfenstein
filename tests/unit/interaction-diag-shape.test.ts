@@ -18,10 +18,9 @@ import {
   secretsFound,
   secretsTotal,
 } from '../../src/interaction/secret-field';
-import { advanceField } from './secret-advance';
-import { at } from './secret-fixture';
+import { advanceField, pushFrom } from './secret-support';
 
-// The fields 001 and 002 own. FR-017 is additive over both contracts, so this
+// The fields 001 and 002 own: FR-017 is additive over both contracts, so this
 // list is what "no existing field renamed, removed or repurposed" means.
 const OWNED_BY_001 = ['ready', 'renderer', 'fps', 'frameTimeMs', 'drawCalls', 'errors'] as const;
 const OWNED_BY_002 = ['level'] as const;
@@ -47,7 +46,7 @@ function published(): Diagnostics {
 }
 
 describe('__diag.interaction carries FR-017 in full (US3-S8)', () => {
-  it('carries every declared field after the first frame', () => {
+  it('carries every declared field after the first frame, typed as the harness reads it', () => {
     const interaction = published().interaction!;
     for (const field of FR_017_FIELDS) {
       expect(Object.prototype.hasOwnProperty.call(interaction, field)).toBe(true);
@@ -55,10 +54,6 @@ describe('__diag.interaction carries FR-017 in full (US3-S8)', () => {
     // The zero-initialised object is exactly FR-017's set; the running page adds
     // `secretRemainingTiles`, which US3 declares by augmentation and nothing else.
     expect(Object.keys(interaction).sort()).toEqual([...FR_017_FIELDS].sort());
-  });
-
-  it('types each field the way the harness reads it', () => {
-    const interaction = published().interaction!;
     expect(Number.isInteger(interaction.doorsTotal)).toBe(true);
     expect(Number.isInteger(interaction.doorsOpen)).toBe(true);
     expect(Number.isInteger(interaction.secretsFound)).toBe(true);
@@ -72,39 +67,31 @@ describe('__diag.interaction carries FR-017 in full (US3-S8)', () => {
   it('is stable in shape across reads and across every setter', () => {
     const diag = published();
     const shape = Object.keys(diag.interaction!).sort();
-
     setDoorCounts(diag.interaction!, 5, 2);
     setSecretCounts(diag.interaction!, 1, 2);
     setKeyCounts(diag.interaction!, { silver: 1, gold: 0 });
     setKeyConsumed(diag.interaction!, false);
     for (const outcome of INTERACT_OUTCOMES) recordOutcome(diag.interaction!, outcome, 'silver');
-
     expect(Object.keys(diag.interaction!).sort()).toEqual(shape);
     expect(ensureInteractionDiag(diag)).toBe(diag.interaction);
     expect(Object.keys(diag.interaction!).sort()).toEqual(shape);
   });
 
   it('leaves every field 001 and 002 own intact beside it', () => {
-    const before = createDiagnostics('webgl');
-    const snapshot = JSON.stringify(before);
-
+    const snapshot = JSON.stringify(createDiagnostics('webgl'));
     const diag = createDiagnostics('webgl');
     ensureInteractionDiag(diag);
     setSecretCounts(diag.interaction!, 2, 2);
     setDoorCounts(diag.interaction!, 5, 5);
-
     for (const field of [...OWNED_BY_001, ...OWNED_BY_002]) {
       expect(Object.prototype.hasOwnProperty.call(diag, field)).toBe(true);
     }
     const { interaction, ...rest } = diag;
     expect(interaction).not.toBeUndefined();
     expect(JSON.stringify(rest)).toBe(snapshot);
-  });
-
-  it('adds `interaction` and nothing else to 001’s object', () => {
+    // `interaction` is the only key 001's object gained.
     const bare = Object.keys(createDiagnostics('webgl')).sort();
-    const withInteraction = Object.keys(published()).sort();
-    expect(withInteraction).toEqual([...bare, 'interaction'].sort());
+    expect(Object.keys(diag).sort()).toEqual([...bare, 'interaction'].sort());
   });
 
   it('names `lastReason` only from the declared outcome set', () => {
@@ -118,31 +105,26 @@ describe('__diag.interaction carries FR-017 in full (US3-S8)', () => {
 
 describe('secretsFound never exceeds secretsTotal (US3-S5, US3-S8, FR-018)', () => {
   it('holds at every observation while the shipped secrets are pushed', () => {
-    const diag = published();
-    const interaction = diag.interaction!;
+    const interaction = published().interaction!;
     const field = buildSecretField(LEVEL_GRID);
     publishSecretCounts(interaction, field);
-
     expect(interaction.secretsTotal).toBe(secretsTotal(field));
     expect(interaction.secretsFound).toBe(0);
 
     let previous = interaction.secretsFound;
     for (let pass = 0; pass < 3; pass += 1) {
       for (const secret of field.secrets) {
-        const from: [number, number] =
-          secret.axis === 'x' ? at(secret.x - 1, secret.z) : at(secret.x, secret.z - 1);
-        interactWithSecrets(field, ...from);
+        interactWithSecrets(field, ...pushFrom(field, secret.x, secret.z));
         advanceField(field, SECRET_TRAVEL_MS / 3);
         publishSecretCounts(interaction, field);
-
         expect(interaction.secretsFound).toBeGreaterThanOrEqual(previous);
         expect(interaction.secretsFound).toBeLessThanOrEqual(interaction.secretsTotal);
         expect(Number.isInteger(interaction.secretsFound)).toBe(true);
         previous = interaction.secretsFound;
       }
     }
-
     expect(interaction.secretsFound).toBe(interaction.secretsTotal);
     expect(interaction.secretsFound).toBe(secretsFound(field));
   });
 });
+
