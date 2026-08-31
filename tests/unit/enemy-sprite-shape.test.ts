@@ -18,6 +18,9 @@ import {
 } from '../../src/enemy/sprite-shape';
 import { VIEW_ANGLE_COUNT } from '../../src/enemy/view-angle';
 import { expectPure } from './enemy-pure';
+import { readdirSync } from 'node:fs';
+import { extname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const plan = guardSheetPlan();
 
@@ -140,6 +143,33 @@ describe('the draw program', () => {
       expect(tops[i]!).toBeGreaterThanOrEqual(tops[i - 1]!);
     }
     expect(tops[tops.length - 1]!).toBeGreaterThan(tops[0]!);
+  });
+});
+
+// US4-S2's second half, and Constitution II's whole point: the guard's art is a
+// program in the tree, and there is no image file anywhere for it to have come
+// from instead. Checked here rather than only in the smoke gate, because the
+// story's Independent Test states it under `npm run test`.
+describe('no image asset exists in the repository', () => {
+  const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+  const SKIP = new Set(['node_modules', 'dist', '.git', '.cache']);
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+
+  function imagesUnder(dir: string): string[] {
+    const found: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (SKIP.has(entry.name)) continue;
+        found.push(...imagesUnder(join(dir, entry.name)));
+      } else if (IMAGE_EXTENSIONS.includes(extname(entry.name).toLowerCase())) {
+        found.push(join(dir, entry.name));
+      }
+    }
+    return found;
+  }
+
+  it('finds no .png, .jpg, .jpeg, .gif or .webp at any path', () => {
+    expect(imagesUnder(root)).toEqual([]);
   });
 });
 
