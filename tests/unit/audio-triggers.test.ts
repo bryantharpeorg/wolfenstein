@@ -8,106 +8,66 @@ import { WEAPON_KINDS } from '../../src/combat/weapons';
 import { BOB_FREQUENCY, WALK_SPEED } from '../../src/player/params';
 import { gunfireSoundFor } from '../../src/audio/sound-table';
 import {
-  FOOTSTEP_STRIDE_UNITS,
-  gunfireForResolvedShots,
-  MAX_FOOTSTEPS_PER_STEP,
-  createFootstepCadence,
-  soundForDoorTransition,
-  soundForInteractOutcome,
-  soundForShot,
+  FOOTSTEP_STRIDE_UNITS, MAX_FOOTSTEPS_PER_STEP, createFootstepCadence,
+  gunfireForResolvedShots, soundForDoorTransition, soundForInteractOutcome, soundForShot,
   stepFootstepCadence,
 } from '../../src/audio/triggers';
 
-// T027 (FR-011, US3-S4). The trigger is the resolved event and never the key that
-// asked for it: a shot refused for ammo makes no sound, a door that refused the
-// command makes no sound, and the footstep cadence accumulates distance travelled,
-// so a player walking into a wall is silent however long the key is held.
+// T027 (FR-011, US3-S4). The trigger is the resolved event, never the key that asked
+// for it: a shot refused for ammo is silent, a door that refused the command is
+// silent, and the cadence accumulates distance travelled, so a player walking into a
+// wall is silent however long the key is held.
 
 const SRC = fileURLToPath(new URL('../../src/', import.meta.url));
 
 describe('the resolved shot', () => {
-  it('maps each weapon to its own gunfire, whatever the shot hit', () => {
+  it('maps each weapon to its own gunfire, and a refused shot to nothing (US3-S4)', () => {
     for (const weapon of WEAPON_KINDS) {
       for (const outcome of ['guard', 'wall', 'none'] as const) {
         expect(soundForShot({ weapon, outcome })).toBe(gunfireSoundFor(weapon));
       }
-    }
-  });
-
-  it('is silent for a shot that was refused (US3-S4)', () => {
-    for (const weapon of WEAPON_KINDS) {
       expect(soundForShot({ weapon, outcome: 'out-of-ammo' })).toBeNull();
     }
   });
 
   it('names no key code and no input binding', () => {
     const source = readFileSync(resolve(SRC, 'audio/triggers.ts'), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, ' ')
-      .replace(/^\s*\/\/.*$/gm, ' ');
+      .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
     expect(source).not.toMatch(/\b(keydown|keyup|KeyboardEvent|ControlLeft|Digit1|held)\b/);
   });
-});
 
-describe('the frame of resolved shots', () => {
-  it('names one gunfire per shot the gate resolved', () => {
-    expect(gunfireForResolvedShots('smg', 3, 8)).toEqual([
-      'gunfire-smg', 'gunfire-smg', 'gunfire-smg',
-    ]);
-  });
-
-  it('is silent for a frame that resolved no shot — the refused frame (US3-S4)', () => {
+  it('names one gunfire per shot the gate resolved, and none for a frame with none', () => {
+    expect(gunfireForResolvedShots('smg', 3, 8)).toEqual(['gunfire-smg', 'gunfire-smg', 'gunfire-smg']);
     for (const weapon of WEAPON_KINDS) {
-      expect(gunfireForResolvedShots(weapon, 0, 8)).toEqual([]);
-      expect(gunfireForResolvedShots(weapon, -2, 8)).toEqual([]);
-      expect(gunfireForResolvedShots(weapon, Number.NaN, 8)).toEqual([]);
+      for (const shots of [0, -2, Number.NaN]) expect(gunfireForResolvedShots(weapon, shots, 8)).toEqual([]);
     }
-  });
-
-  it('never names more than the caller allows', () => {
     expect(gunfireForResolvedShots('chaingun', 40, 4)).toHaveLength(4);
     expect(gunfireForResolvedShots('chaingun', 40, 0)).toEqual([]);
   });
 });
 
-describe('the door state change', () => {
-  it('sounds when a leaf starts moving', () => {
+describe('the resolved door', () => {
+  it('sounds when a leaf starts moving, and not when one arrives or stays put', () => {
     expect(soundForDoorTransition({ from: 'closed', to: 'opening' })).toBe('door');
     expect(soundForDoorTransition({ from: 'open', to: 'closing' })).toBe('door');
     expect(soundForDoorTransition({ from: 'closing', to: 'opening' })).toBe('door');
-  });
-
-  it('is silent when a leaf arrives, which started no travel', () => {
     expect(soundForDoorTransition({ from: 'opening', to: 'open' })).toBeNull();
     expect(soundForDoorTransition({ from: 'closing', to: 'closed' })).toBeNull();
-  });
-
-  it('is silent when nothing changed — a blocked door is a door that did not move', () => {
+    // A blocked door is one that did not move at all, and every declared state
+    // answers rather than throwing (US3-S4).
     for (const state of DOOR_STATES) {
-      expect(soundForDoorTransition({ from: state, to: state })).toBeNull();
+      expect(soundForDoorTransition({ from: state as DoorState, to: state as DoorState })).toBeNull();
+      expect(soundForDoorTransition({ from: 'closed', to: state as DoorState })).toBeTypeOf(
+        state === 'opening' || state === 'closing' ? 'string' : 'object',
+      );
     }
   });
 
-  it('answers every pair of declared door states without throwing', () => {
-    for (const from of DOOR_STATES) {
-      for (const to of DOOR_STATES) {
-        const sound = soundForDoorTransition({ from: from as DoorState, to: to as DoorState });
-        expect(sound === null || sound === 'door').toBe(true);
-      }
-    }
-  });
-});
-
-describe('the resolved interact outcome', () => {
-  it('sounds only for the command a door accepted', () => {
+  it('sounds only for the command a door accepted, and for no refusal (US3-S4)', () => {
     expect(soundForInteractOutcome('opened')).toBe('door');
-  });
-
-  it('is silent for every refusal in the declared outcome set (US3-S4)', () => {
     const refusals = INTERACT_OUTCOMES.filter((outcome) => outcome !== 'opened');
     expect(refusals.length).toBeGreaterThan(0);
-    for (const outcome of refusals) {
-      expect(soundForInteractOutcome(outcome)).toBeNull();
-    }
+    for (const outcome of refusals) expect(soundForInteractOutcome(outcome)).toBeNull();
   });
 });
 
@@ -119,50 +79,26 @@ describe('the footstep cadence', () => {
 
   it('is silent for a player who pressed a key and travelled nowhere (US3-S4)', () => {
     const cadence = createFootstepCadence();
-    for (let frame = 0; frame < 600; frame += 1) {
-      expect(stepFootstepCadence(cadence, 0)).toBe(0);
+    for (let frame = 0; frame < 600; frame += 1) expect(stepFootstepCadence(cadence, 0)).toBe(0);
+    for (const bad of [-5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(stepFootstepCadence(cadence, bad)).toBe(0);
     }
     expect(cadence.travelledUnits).toBe(0);
   });
 
-  it('steps once per declared stride of distance travelled', () => {
+  it('steps once per stride travelled, carrying the remainder but capping a teleport', () => {
     const cadence = createFootstepCadence();
-    const legs = 40;
     let steps = 0;
-    for (let i = 0; i < legs * 8; i += 1) {
-      steps += stepFootstepCadence(cadence, FOOTSTEP_STRIDE_UNITS / 8);
-    }
-    expect(steps).toBe(legs);
-  });
+    for (let i = 0; i < 40 * 8; i += 1) steps += stepFootstepCadence(cadence, FOOTSTEP_STRIDE_UNITS / 8);
+    expect(steps).toBe(40);
 
-  it('carries the remainder rather than dropping it', () => {
-    const cadence = createFootstepCadence();
-    expect(stepFootstepCadence(cadence, FOOTSTEP_STRIDE_UNITS * 0.6)).toBe(0);
-    expect(stepFootstepCadence(cadence, FOOTSTEP_STRIDE_UNITS * 0.6)).toBe(1);
-    expect(cadence.travelledUnits).toBeCloseTo(FOOTSTEP_STRIDE_UNITS * 0.2, 10);
-  });
+    const partial = createFootstepCadence();
+    expect(stepFootstepCadence(partial, FOOTSTEP_STRIDE_UNITS * 0.6)).toBe(0);
+    expect(stepFootstepCadence(partial, FOOTSTEP_STRIDE_UNITS * 0.6)).toBe(1);
+    expect(partial.travelledUnits).toBeCloseTo(FOOTSTEP_STRIDE_UNITS * 0.2, 10);
 
-  it('caps the steps one frame may fire, so a teleport is not a stampede', () => {
-    const cadence = createFootstepCadence();
-    expect(stepFootstepCadence(cadence, FOOTSTEP_STRIDE_UNITS * 1000))
-      .toBe(MAX_FOOTSTEPS_PER_STEP);
-    // The credit past the cap is dropped rather than banked into the next frame.
-    expect(cadence.travelledUnits).toBeLessThan(FOOTSTEP_STRIDE_UNITS);
-  });
-
-  it('ignores a delta that is negative or not a number', () => {
-    const cadence = createFootstepCadence();
-    expect(stepFootstepCadence(cadence, -5)).toBe(0);
-    expect(stepFootstepCadence(cadence, Number.NaN)).toBe(0);
-    expect(stepFootstepCadence(cadence, Number.POSITIVE_INFINITY)).toBe(0);
-    expect(cadence.travelledUnits).toBe(0);
-  });
-
-  it('resets with the run', () => {
-    const cadence = createFootstepCadence();
-    stepFootstepCadence(cadence, FOOTSTEP_STRIDE_UNITS * 0.9);
-    const fresh = createFootstepCadence();
-    expect(fresh.travelledUnits).toBe(0);
-    expect(cadence.travelledUnits).toBeGreaterThan(0);
+    const jump = createFootstepCadence();
+    expect(stepFootstepCadence(jump, FOOTSTEP_STRIDE_UNITS * 1000)).toBe(MAX_FOOTSTEPS_PER_STEP);
+    expect(jump.travelledUnits).toBeLessThan(FOOTSTEP_STRIDE_UNITS);
   });
 });

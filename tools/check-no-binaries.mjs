@@ -10,10 +10,7 @@ const FORBIDDEN = new Set([
   '.mp3',
   '.wav',
   '.ogg',
-  // 008 FR-009 names four audio extensions and Constitution II's list predates
-  // the audio story; a synthesized-sound spec must not be landable beside the
-  // one container its own gate did not check for (T035).
-  '.m4a',
+  '.m4a', // 008 FR-009 names four audio extensions; this one the list omitted (T035)
   '.glb',
   '.gltf',
   '.fbx',

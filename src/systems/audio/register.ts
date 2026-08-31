@@ -1,36 +1,15 @@
-/**
- * The audio system (order 85): the DOM edge of US3. Every decision lives in
- * `src/audio/` and is asserted without a page — the table, the synthesis, the cap
- * and the trigger mapping are all pure — so what is left here is subscription:
- * which resolved fact this frame is a sound, and which is not. Neither
- * `src/main.ts` nor `src/diag/diag.ts` is edited; 001's glob discovery finds this
- * file and `audio` arrives by module augmentation.
- *
- * Order 85 is after combat (70), vitals (75) and the elevator (80) and before the
- * stats screen (95): the counters this reads are the ones this frame settled on.
- *
- * The story's rule is that a sound answers the *resolved* event (FR-011), so every
- * subscription here is a difference between two settled readings and never a key:
- *
- * - Gunfire: the delta of 007's `shotsFired`, which excludes refusals by
- *   construction, so an empty magazine clicks nothing (US3-S4).
- * - Doors: the difference between a leaf's state last frame and this one, so a
- *   locked door — which answered `locked-missing-key` and did not move — is
- *   silent, and so is a door that only had its dwell reset.
- * - Footsteps: distance actually travelled, so a player pressed into a wall is
- *   silent however long they hold the key.
- *
- * And startup never awaits audio (FR-012): `createAudioEngine()` is synchronous,
- * returns an engine whether or not a context exists, and leaves it suspended until
- * a gesture that may never come.
- */
+// The audio system (order 85): the DOM edge of US3, and only subscription, every
+// decision living in `src/audio/` where it is asserted without a page. 001's glob
+// discovery finds this file and `audio` arrives by module augmentation, so no shared
+// wiring is edited; order 85 is after combat, vitals and the elevator, so the counters
+// read here are the ones this frame settled on. A sound answers the *resolved* event
+// (FR-011): gunfire is the delta of 007's `shotsFired`, which excludes refusals; a door
+// is a leaf's state changing; a footstep is distance actually travelled. Startup never
+// awaits audio (FR-012) — the engine is built synchronously and left suspended.
+
 import { defineSystem, type GameContext } from '../../boot/registry';
 import { createAudioEngine, type AudioEngine } from '../../audio/context';
-import {
-  ensureAudioDiag,
-  publishAudioDiagnostics,
-  type AudioDiagnostics,
-} from '../../audio/diag';
+import { ensureAudioDiag, publishAudioDiagnostics, type AudioDiagnostics } from '../../audio/diag';
 import {
   createFootstepCadence,
   gunfireForResolvedShots,
@@ -45,18 +24,11 @@ import type { Door, DoorState } from '../../interaction/door';
 import { getDoorField } from '../doors/register';
 import { SPRINT_SPEED } from '../../player/params';
 
-/** The events a first gesture may arrive as (FR-012). Any one resumes; the rest
- *  then find the context already running and cost nothing. */
 const GESTURE_EVENTS = ['pointerdown', 'mousedown', 'keydown', 'touchstart'] as const;
 
-/**
- * The furthest one frame may credit to the player's legs, as a multiple of what
- * sprinting for that frame would cover. Anything beyond it was not walked: a
- * restart puts the player back at spawn in no time at all, and the harness drives
- * several simulated steps between two frames. Credit past the bound is dropped
- * rather than banked, so a jump across the map is at most one frame of walking
- * and never the burst of footsteps its raw distance would buy.
- */
+/** The furthest one frame credits to the legs, as a multiple of a frame of sprinting:
+ *  beyond it was not walked — a restart returns the player to spawn in no time — and
+ *  is dropped rather than banked, so a jump buys one frame of walking at most. */
 const TELEPORT_SPEED_FACTOR = 2;
 
 const MILLISECONDS_PER_SECOND = 1000;
@@ -66,21 +38,16 @@ let audio: AudioDiagnostics | null = null;
 let combat: CombatDiagnostics | null = null;
 let cadence: FootstepCadence = createFootstepCadence();
 
-/** Whether a user gesture has been seen, whatever the context did with it. */
 let gestured = false;
 
-/** The counters this system last saw settled, so a frame's sound is a delta. */
 let lastShotsFired = 0;
 let lastX: number | null = null;
 let lastZ: number | null = null;
 const doorStates = new Map<Door, DoorState>();
 
-/** The clock voices are aged against: the frame time this system has accumulated,
- *  so a suspended tab does not retire a voice it never played. */
+/** The clock voices age against: frame time, so a hidden tab retires nothing. */
 let clockMs = 0;
 
-/** 007's restart (FR-011): the counters this reads all return to zero, so the
- *  deltas must too or the first frame of a new run fires the old run's shots. */
 function resetAudioRun(): void {
   lastShotsFired = 0;
   lastX = null;
@@ -94,19 +61,16 @@ function bindGestures(): void {
     gestured = true;
     engine?.resume();
   };
-  for (const type of GESTURE_EVENTS) {
-    window.addEventListener(type, wake, { passive: true });
-  }
+  for (const type of GESTURE_EVENTS) window.addEventListener(type, wake, { passive: true });
 
-  // A hidden tab goes quiet and a returning one comes back — through the same
-  // context, and without a second drone, which `startDrone` refuses (Edge Cases).
+  // A hidden tab goes quiet and a returning one comes back through the same context,
+  // without a second drone, which `startDrone` refuses.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') engine?.suspend();
     else if (gestured) engine?.resume();
   });
 }
 
-/** The gunfire this frame's resolved shots earned (FR-011, US3-S4). */
 function playGunfire(): void {
   if (engine == null || combat == null) return;
   const fired = combat.shotsFired - lastShotsFired;
@@ -118,7 +82,6 @@ function playGunfire(): void {
   }
 }
 
-/** The grind of every leaf that started moving since the last frame (FR-011). */
 function playDoors(): void {
   const field = getDoorField();
   if (engine == null || field == null) return;
@@ -131,7 +94,6 @@ function playDoors(): void {
   }
 }
 
-/** The footfalls the distance actually travelled earned (FR-011, US3-S4). */
 function playFootsteps(ctx: GameContext, deltaMs: number): void {
   if (engine == null) return;
   const player = ctx.diag.player;
@@ -145,7 +107,6 @@ function playFootsteps(ctx: GameContext, deltaMs: number): void {
 
   const plausible = (SPRINT_SPEED * deltaMs * TELEPORT_SPEED_FACTOR) / MILLISECONDS_PER_SECOND;
   const travelled = Math.min(Math.hypot(x - fromX, z - fromZ), plausible);
-  // The declared cadence: one call, whose argument is distance and nothing else.
   const steps = stepFootstepCadence(cadence, travelled);
   for (let step = 0; step < steps; step += 1) engine.play('footstep', clockMs);
 }
@@ -157,8 +118,7 @@ defineSystem({
   setup(ctx) {
     audio = ensureAudioDiag(ctx.diag);
     combat = ensureCombatDiag(ctx.diag);
-    // Synchronous, total, and never awaited: a context that cannot be built is a
-    // `fallbacks` line and a silent game (FR-012, US3-S9).
+    // Never awaited: a context that cannot be built is a silent game (FR-012, US3-S9).
     engine = createAudioEngine();
     lastShotsFired = combat.shotsFired;
     bindGestures();
@@ -168,11 +128,12 @@ defineSystem({
 
   update(ctx, deltaMs) {
     if (engine == null || audio == null) return;
-    if (Number.isFinite(deltaMs) && deltaMs > 0) clockMs += deltaMs;
+    const elapsed = Number.isFinite(deltaMs) && deltaMs > 0 ? deltaMs : 0;
+    clockMs += elapsed;
 
     playGunfire();
     playDoors();
-    playFootsteps(ctx, Number.isFinite(deltaMs) && deltaMs > 0 ? deltaMs : 0);
+    playFootsteps(ctx, elapsed);
 
     // The bed, once a gesture has let it start; a no-op on every other frame.
     engine.startDrone(clockMs);

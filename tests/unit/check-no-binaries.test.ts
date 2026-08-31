@@ -69,10 +69,7 @@ describe('check-no-binaries', () => {
       'k.fbx',
       'l.ttf',
       'm.woff',
-      // 008 FR-009 names four audio extensions; the shipped list omitted this
-      // one, so a synthesized-audio story could have landed beside a file it
-      // forbids and the gate would have passed (T035).
-      'n.m4a',
+      'n.m4a', // 008 FR-009 names four audio extensions; this one was omitted (T035)
     ];
     for (const name of forbidden) {
       writeFileSync(join(tmp, name), name);
@@ -86,14 +83,11 @@ describe('check-no-binaries', () => {
 
   it('flags every audio extension FR-009 names, in any case', async () => {
     // The four the audio story forbids, spelled as a stray asset would be.
-    for (const name of ['shot.MP3', 'door.Wav', 'step.OGG', 'drone.M4A']) {
-      const nested = mkdtempSync(join(tmpdir(), 'check-no-binaries-audio-'));
-      writeFileSync(join(nested, name), 'not synthesized');
-      const result = await runChecker(nested);
-      expect(result.exitCode, name).toBe(1);
-      expect(result.output).toContain(name);
-      rmSync(nested, { recursive: true, force: true });
-    }
+    const names = ['shot.MP3', 'door.Wav', 'step.OGG', 'drone.M4A'];
+    for (const name of names) writeFileSync(join(tmp, name), 'not synthesized');
+    const result = await runChecker(tmp);
+    expect(result.exitCode).toBe(1);
+    for (const name of names) expect(result.output).toContain(name);
   });
 
   it('does not flag node_modules or dist by default in the checked root', async () => {
