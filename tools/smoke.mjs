@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -97,6 +97,33 @@ function startServer() {
   });
 }
 
+// The executable names a Playwright Chromium build ships under, full browser first.
+const CHROMIUM_EXECUTABLES = ['chrome', 'chrome-headless-shell', 'headless_shell'];
+
+// The first Chromium executable under `root`, or null. Bounded to the two levels a
+// browser cache actually uses -- `<root>/<build>/<platform-dir>/<exe>` -- so a wrong
+// PLAYWRIGHT_BROWSERS_PATH fails fast instead of walking a filesystem.
+function findChromiumUnder(root) {
+  if (!existsSync(root)) return null;
+  const builds = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith('chromium'))
+    .map((entry) => resolve(root, entry.name))
+    .sort();
+  for (const build of builds) {
+    const platforms = readdirSync(build, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => resolve(build, entry.name))
+      .sort();
+    for (const directory of [build, ...platforms]) {
+      for (const name of CHROMIUM_EXECUTABLES) {
+        const candidate = resolve(directory, name);
+        if (existsSync(candidate)) return candidate;
+      }
+    }
+  }
+  return null;
+}
+
 function resolveBrowser() {
   const chromePath = process.env.CHROME_PATH;
   if (chromePath) {
@@ -108,20 +135,18 @@ function resolveBrowser() {
 
   const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
   if (browsersPath) {
-    // Try the real Chromium layout used by installed browser caches.
-    const candidates = [
-      resolve(browsersPath, 'chromium-1234', 'chrome-linux64', 'chrome'),
-      resolve(browsersPath, 'chromium', 'chrome-linux', 'chrome'),
-      resolve(browsersPath, 'chromium_headless_shell-1234', 'chrome-headless-shell-linux64', 'chrome-headless-shell'),
-      resolve(browsersPath, 'chromium-HEADLESS-shell', 'chrome-linux', 'chrome'),
-    ];
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        return candidate;
-      }
-    }
+    // Discovered rather than guessed (T022). A browser cache is named for the build it
+    // holds -- `chromium-1187`, `chromium_headless_shell-1194` -- so a list of literal
+    // paths is a list of build numbers this file would have to be reopened to bump, and
+    // the failure when one moved would read "no Chromium here" beside a directory that
+    // has one. Every `chromium*` entry is walked instead, and only the *message* is
+    // hard-coded.
+    const found = findChromiumUnder(browsersPath);
+    if (found != null) return found;
     fail(
-      `Missing browser: PLAYWRIGHT_BROWSERS_PATH=${browsersPath} does not contain a Chromium executable.`,
+      `Missing browser: PLAYWRIGHT_BROWSERS_PATH=${browsersPath} does not contain a ` +
+        `Chromium executable (looked for ${CHROMIUM_EXECUTABLES.join(', ')} under every ` +
+        'chromium* directory).',
     );
   }
 
