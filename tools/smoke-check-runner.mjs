@@ -35,7 +35,10 @@ async function runSmokeCheck(browser, url, root, file) {
     });
     const module = await import(pathToFileURL(resolve(CHECKS_DIR, file)).href);
     if (typeof module.default !== 'function') {
-      errors.push('module has no default-exported check function');
+      // named-check modules belong to smoke.mjs's in-session harness, not this one
+      if (typeof module.check !== 'function') {
+        errors.push('module has no default-exported check function');
+      }
     } else {
       const found = await module.default({ page, url, root });
       if (!Array.isArray(found)) {
