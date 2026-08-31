@@ -1,62 +1,25 @@
-/**
- * The HUD system (order 90): the render edge of US4 (FR-016, FR-017, FR-018).
- * Every decision lives in `src/hud/` and is tested without a page; this file
- * composites the readouts into one texture, drives the view-model and the muzzle
- * flash from the shots the combat system resolved, and publishes `muzzleFlash` and
- * `hudReady` into `__diag.combat`. 001's glob discovery finds it, so neither
- * `src/main.ts` nor `src/diag/diag.ts` is edited by this story.
- *
- * Order 90 is last, and for one reason: every value the HUD shows must be *this*
- * frame's. Combat publishes ammo and the active weapon at 70, pickups at 74 and
- * vitals health and score at 75, so reading `__diag` here reads what those systems
- * wrote a moment ago rather than what they wrote a frame ago (US4-S3). The same
- * ordering is what makes the flash begin on the frame its shot resolved: the shot
- * counter this file watches was incremented twenty units of order earlier, in the
- * same frame (US4-S6).
- *
- * The flash is driven by `combat.shotsFired`, which the fire control increments
- * only for a shot that actually left the barrel. A trigger held while out of ammo,
- * mid-switch or dead moves that counter not at all, so it lights nothing — the
- * flash follows shots and not the fire key, structurally (US4-S7).
- *
- * Three objects are added to the scene graph, all parented to the camera: the HUD
- * quad, the view-model, and the flash inside it. That is two draw calls at rest and
- * three with the flash lit, against a budget of twenty (FR-018, SC-006).
- */
+// The HUD system (order 90): the render edge of US4 (FR-016, FR-017, FR-018). Every decision
+// lives in `src/hud/` and is tested without a page; this file composites the readouts into
+// one texture, drives the view-model and the flash from the shots combat resolved, and
+// publishes `muzzleFlash` and `hudReady`. 001's glob discovery finds it, so neither
+// `main.ts` nor `diag.ts` is edited by this story. Order 90 is last because every value it
+// shows must be *this* frame's: combat publishes at 70 and vitals at 75 (US4-S3), and the
+// shot counter the flash watches moved in this same frame (US4-S6) -- a counter that moves
+// only for a shot that left the barrel, so a trigger held while dead or empty lights
+// nothing (US4-S7).
 import { CanvasTexture, LinearFilter, Mesh, MeshBasicMaterial, PlaneGeometry, SRGBColorSpace } from 'three';
 import { defineSystem, type GameContext } from '../../boot/registry';
 import { ensureCombatDiag, type CombatDiagnostics } from '../../combat/combat-diag';
 import { registerResettable } from '../../combat/restart';
-import {
-  HUD_CANVAS_HEIGHT,
-  HUD_CANVAS_WIDTH,
-  createHudSurface,
-  drawHud,
-  type HudReadout,
-  type HudSurface,
-} from '../../hud/compose';
-import {
-  createFlashState,
-  flashIntensity,
-  igniteFlash,
-  resetFlash,
-  stepFlash,
-  type FlashState,
-} from '../../hud/flash';
+import { HUD_CANVAS_HEIGHT, HUD_CANVAS_WIDTH, createHudSurface, drawHud, type HudReadout,
+  type HudSurface } from '../../hud/compose';
+import { createFlashState, flashIntensity, igniteFlash, resetFlash, stepFlash,
+  type FlashState } from '../../hud/flash';
 import { portraitIndexForHealth } from '../../hud/portrait';
 import { VIEWMODEL_REST, createWeaponViewModel, type WeaponViewModel } from '../../hud/viewmodel';
 
-const MILLISECONDS_PER_SECOND = 1000;
-
-/** How far in front of the camera the HUD quad sits. Well inside the near plane's
- *  0.1, and nearer than the view-model, though render order rather than depth is
- *  what actually decides the two — both draw with depth testing off. */
-const HUD_DISTANCE = 0.2;
-
-/** Above the view-model's, so the bar is never drawn through by the gun. */
-const HUD_RENDER_ORDER = 1000;
-
-const DEGREES_TO_RADIANS = Math.PI / 180;
+const MILLISECONDS_PER_SECOND = 1000, DEGREES_TO_RADIANS = Math.PI / 180;
+const HUD_DISTANCE = 0.2, HUD_RENDER_ORDER = 1000;
 
 let combat: CombatDiagnostics | null = null;
 let surface: HudSurface | null = null;
@@ -65,14 +28,8 @@ let quad: Mesh | null = null;
 let viewModel: WeaponViewModel | null = null;
 let flash: FlashState = createFlashState();
 
-/** The published shot count this file has already lit a flash for. Assigned every
- *  frame rather than only when it rises, so a restart's return to zero rebases it
- *  instead of swallowing the next shot. */
 let lastShotsFired = 0;
 
-/** Scales the quad to span the viewport's width at `HUD_DISTANCE` and sit on its
- *  bottom edge. Recomputed on resize, so the bar keeps its proportions rather than
- *  its pixel size. */
 function fitQuad(ctx: GameContext): void {
   if (quad == null) return;
   const viewHeight = 2 * HUD_DISTANCE * Math.tan((ctx.camera.fov * DEGREES_TO_RADIANS) / 2);
@@ -82,13 +39,6 @@ function fitQuad(ctx: GameContext): void {
   quad.position.set(0, -viewHeight / 2 + height / 2, -HUD_DISTANCE);
 }
 
-/**
- * Whether every readout has a source. Health, weapon, ammo and score come from
- * `__diag.combat` and the key counts from `__diag.interaction`; the other two
- * checks are the Edge Case the spec names — the HUD must not be asserted against
- * while the guards or the pickups are still being instantiated, so `hudReady` waits
- * for the systems that publish them to have run their setup.
- */
 function sourcesReady(ctx: GameContext): boolean {
   return (
     combat != null &&
@@ -100,26 +50,15 @@ function sourcesReady(ctx: GameContext): boolean {
   );
 }
 
-/**
- * The scripted-reading seam, in the shape 003's `__playerDrive` and 006's
- * `__enemySprites` established. What the HUD *displays* lives in a texture the
- * harness cannot read back as text, so the values that texture was composited
- * from are published here instead — US4-S2 and US4-S3 are claims about those
- * values, and this is the only way to state them against the built page.
- */
+/** What the HUD displays lives in a texture the harness cannot read back as text, so the
+ *  values it was composited from are published here (US4-S2, US4-S3). */
 export interface HudHarness {
-  /** The readout the current composite was drawn from. */
   drawn(): HudReadout | null;
-  /** Composites that actually redrew the canvas, so a change can be shown to
-   *  have reached the texture rather than only the readout. */
   composites(): number;
-  /** Where the view-model is and whether its flash is drawn, plus the rest pose
-   *  it must return to, so US4-S6's "both return to rest" is a reading of the
-   *  mesh rather than of the arithmetic behind it. */
-  viewModel(): {
-    pose: { x: number; y: number; z: number; pitch: number; flashVisible: boolean };
-    rest: { x: number; y: number; z: number };
-  } | null;
+  /** Where the view-model is, whether its flash is drawn, and the rest pose it must
+   *  return to — so US4-S6 is read off the mesh, not off the arithmetic. */
+  viewModel(): { pose: { x: number; y: number; z: number; pitch: number; flashVisible: boolean };
+    rest: { x: number; y: number; z: number } } | null;
 }
 
 declare global {
@@ -128,10 +67,10 @@ declare global {
   }
 }
 
-let drawn: HudReadout | null = null;
-let composites = 0;
+let drawn: HudReadout | null = null, composites = 0;
 
-/** What the HUD draws this frame, read from live state and held nowhere. */
+/** This frame's readout, held nowhere; keys by copy, since `drawn()` must be what was
+ *  *composited* (US4-S3). */
 function readout(ctx: GameContext): HudReadout {
   const live = combat!;
   const keys = ctx.diag.interaction!.keys;
@@ -139,15 +78,12 @@ function readout(ctx: GameContext): HudReadout {
     health: live.health,
     weapon: live.weapon,
     ammo: live.ammo[live.weapon],
-    // By copy, not by reference: `drawn()` has to be what was *composited*, and a
-    // live handle would silently agree with every later change.
     keys: { silver: keys.silver, gold: keys.gold },
     score: live.score,
     portraitIndex: portraitIndexForHealth(live.health),
   };
 }
 
-/** US2's restart (FR-011): the flash goes dark with the run it belonged to. */
 function resetHudRun(): void {
   resetFlash(flash);
   lastShotsFired = 0;
@@ -164,9 +100,6 @@ defineSystem({
     combat = ensureCombatDiag(ctx.diag);
     flash = createFlashState();
 
-    // The camera is the parent of everything this system draws, so it has to be
-    // in the graph the renderer walks. `main.ts` never added it, and adding it
-    // here rather than there is the whole point of the system registry.
     if (ctx.camera.parent == null) ctx.scene.add(ctx.camera);
 
     surface = createHudSurface();
@@ -177,10 +110,8 @@ defineSystem({
       texture.magFilter = LinearFilter;
       texture.generateMipmaps = false;
 
-      quad = new Mesh(
-        new PlaneGeometry(1, 1),
-        new MeshBasicMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false }),
-      );
+      quad = new Mesh(new PlaneGeometry(1, 1),
+        new MeshBasicMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false }));
       quad.renderOrder = HUD_RENDER_ORDER;
       quad.frustumCulled = false;
       ctx.camera.add(quad);
@@ -195,16 +126,13 @@ defineSystem({
     window.__hud = {
       drawn: () => drawn,
       composites: () => composites,
-      viewModel: () =>
-        viewModel == null ? null : { pose: viewModel.pose(), rest: { ...VIEWMODEL_REST } },
+      viewModel: () => (viewModel == null ? null : { pose: viewModel.pose(), rest: { ...VIEWMODEL_REST } }),
     };
   },
 
   update(ctx, deltaMs) {
     if (combat == null) return;
 
-    // The flash is stepped before this frame's shots are counted, so a shot that
-    // resolved this frame reads at full intensity on the frame it resolved.
     stepFlash(flash, deltaMs / MILLISECONDS_PER_SECOND);
     if (combat.shotsFired > lastShotsFired) igniteFlash(flash);
     lastShotsFired = combat.shotsFired;
@@ -219,8 +147,8 @@ defineSystem({
 
     if (!sourcesReady(ctx)) return;
 
-    // Read afresh every frame and never kept: what the composite drew *is* the
-    // live state, which is the whole of US4-S3.
+    // Read afresh every frame and never kept: what was drawn *is* the live state,
+    // which is the whole of US4-S3.
     const values = readout(ctx);
     if (drawHud(surface!, values)) {
       composites += 1;
@@ -228,9 +156,8 @@ defineSystem({
     }
     drawn = values;
 
-    // Only now, and only here: `hudReady` goes true once a composite has been
-    // drawn from values that every one of which has a source, so the harness
-    // never reads a half-built HUD (FR-018, Edge Cases).
+    // Only now: `hudReady` goes true once a composite has been drawn, and only from values
+    // that every one of which has a source (FR-018, Edge Cases).
     combat.hudReady = true;
   },
 
