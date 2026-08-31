@@ -58,6 +58,21 @@ declare global {
   }
 }
 
+/** The live vitals and score, and the republish that puts them back into
+ *  `__diag.combat` (FR-018). The handle US3's pickups heal and pay through, in the
+ *  shape `getFireControl()` and `getKeyRunState()` already established: a health or
+ *  treasure pickup must move *this* run's numbers, and a second copy of them here
+ *  would be a second opinion of the player's health. */
+export interface VitalsRunState {
+  readonly vitals: PlayerVitals;
+  readonly score: ScoreState;
+  readonly publish: () => void;
+}
+
+export function getVitalsRunState(): VitalsRunState | null {
+  return vitals == null || score == null ? null : { vitals, score, publish };
+}
+
 let context: GameContext | null = null;
 let combat: CombatDiagnostics | null = null;
 let vitals: PlayerVitals | null = null;
