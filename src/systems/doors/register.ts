@@ -26,8 +26,8 @@ const DOOR_HEIGHT = CEILING_Y - FLOOR_Y;
 
 let field: DoorField | null = null;
 let interaction: InteractionDiagnostics | null = null;
-/** The names the doorway meshes carry into the scene, so 005's materials system
- *  binds a door's material by surface rather than by scanning vertices. */
+/** The names the doorway meshes carry, so 005 binds a door's material by
+ *  surface rather than by scanning vertices. */
 export const DOOR_SHELL_MESH_NAME = 'door-shell';
 export const DOOR_LEAF_MESH_PREFIX = 'door-leaf-';
 

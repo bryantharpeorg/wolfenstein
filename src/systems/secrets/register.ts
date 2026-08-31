@@ -37,9 +37,8 @@ const SECRET_HEIGHT = CEILING_Y - FLOOR_Y;
 
 let field: SecretField | null = null;
 let interaction: InteractionDiagnostics | null = null;
-/** The names the push-wall meshes carry into the scene. The block's name carries
- *  its tile, so 005's materials system can give it the material of the run it
- *  hides in without reopening this file's state. */
+/** The names the push-wall meshes carry. A block's name carries its tile, so 005
+ *  gives it the run's material without reopening this file's state. */
 export const SECRET_SHELL_MESH_NAME = 'secret-shell';
 export const SECRET_BLOCK_MESH_PREFIX = 'secret-block-';
 

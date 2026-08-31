@@ -37,9 +37,8 @@ export interface LevelGeometry {
 const FLOOR_COLOR = 0x5a5a5a;
 const CEILING_COLOR = 0x7a7a7a;
 
-// The names the merged meshes carry into the scene. A wall run is `level-wall-2`
-// for type ID '2'; the floor and the ceiling are named outright. 005's materials
-// system reads these rather than guessing a wall type back out of vertex data.
+// The names the merged meshes carry, so 005 binds by wall type ID rather than
+// guessing one back out of vertex data.
 export const WALL_MESH_PREFIX = 'level-wall-';
 export const FLOOR_MESH_NAME = 'level-floor';
 export const CEILING_MESH_NAME = 'level-ceiling';
@@ -78,8 +77,6 @@ export function buildLevelGeometry(
     }
     const geometry = buildBufferGeometry(faces.walls[type]!);
     const mesh = new Mesh(geometry, new MeshStandardMaterial({ color: material.color }));
-    // Named, so a later spec can bind a texture to a wall run by its type ID
-    // instead of by an index into this loop (005 FR-008).
     mesh.name = `${WALL_MESH_PREFIX}${type}`;
     walls.push(mesh);
   }

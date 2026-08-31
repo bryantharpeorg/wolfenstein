@@ -9,16 +9,19 @@ import {
 import { emitFaces } from '../../src/geometry/faces';
 import { TILE_SIZE } from '../../src/level';
 
-// FR-009 / US3-S5, US3-S6: UVs are computed in world-tile space, one repeat per
-// tile edge, so a merged run of N tiles spans N UV units and a merge boundary is
-// not a UV boundary. Everything here is pure arithmetic over position and normal
-// arrays — no three.js, no page.
+// FR-009 / US3-S5, US3-S6: UVs in world-tile space, one repeat per tile edge, so
+// a merged run of N tiles spans N UV units and a merge boundary is not a UV
+// boundary. Pure arithmetic over position and normal arrays.
 
 const FLOOR_Y = 0;
 const CEILING_Y = 2;
 
-/** One quad as the face emitter writes it: 4 vertices, 12 position numbers. */
-type Quad = { corners: number[]; normal: readonly [number, number, number] };
+/** One quad as the face emitter writes it. */
+interface Quad {
+  corners: number[];
+  normal: readonly [number, number, number];
+}
+
 
 function pack(quads: Quad[]): { positions: Float32Array; normals: Float32Array } {
   const positions = new Float32Array(quads.length * 12);
@@ -26,112 +29,86 @@ function pack(quads: Quad[]): { positions: Float32Array; normals: Float32Array }
   quads.forEach((quad, q) => {
     for (let i = 0; i < 4; i += 1) {
       const at = q * 12 + i * 3;
-      positions[at] = quad.corners[i * 3]!;
-      positions[at + 1] = quad.corners[i * 3 + 1]!;
-      positions[at + 2] = quad.corners[i * 3 + 2]!;
-      normals[at] = quad.normal[0];
-      normals[at + 1] = quad.normal[1];
-      normals[at + 2] = quad.normal[2];
+      positions.set(quad.corners.slice(i * 3, i * 3 + 3), at);
+      normals.set(quad.normal, at);
     }
   });
   return { positions, normals };
 }
 
-/** A south-facing wall run of N tiles along +X, standing on the z plane. */
+/** A south-facing run of n tiles along +X, standing on the z plane. */
 function southRun(n: number, x0 = 0, z = 0): Quad[] {
-  const quads: Quad[] = [];
-  for (let i = 0; i < n; i += 1) {
+  return Array.from({ length: n }, (_, i) => {
     const x = x0 + i;
-    quads.push({
+    return {
       corners: [x, FLOOR_Y, z, x + 1, FLOOR_Y, z, x + 1, CEILING_Y, z, x, CEILING_Y, z],
-      normal: [0, 0, 1],
-    });
-  }
-  return quads;
+      normal: [0, 0, 1] as const,
+    };
+  });
 }
 
-/** The UV pair of vertex `v`. */
-function uvAt(uvs: Float32Array, v: number): [number, number] {
-  return [uvs[v * 2]!, uvs[v * 2 + 1]!];
-}
+/** The UV pair of vertex `v`, and the UVs of a set of quads. */
+const uvAt = (uvs: Float32Array, v: number): [number, number] => [uvs[v * 2]!, uvs[v * 2 + 1]!];
+
+const uvsOf = (quads: Quad[]): Float32Array => {
+  const { positions, normals } = pack(quads);
+  return computeTileUVs(positions, normals);
+};
 
 describe('the declared tiling constants', () => {
-  it('repeats once per world tile edge', () => {
+  it('repeat once per world tile edge, and declare US3-S6\'s epsilon', () => {
     expect(UV_TILE_EDGE).toBe(TILE_SIZE);
-  });
-
-  it('declares the agreement epsilon US3-S6 is measured against', () => {
     expect(UV_AGREEMENT_EPSILON).toBeGreaterThan(0);
     expect(UV_AGREEMENT_EPSILON).toBeLessThan(1e-3);
   });
 });
 
 describe('dominantAxis', () => {
-  it('reads a face plane off its normal', () => {
-    expect(dominantAxis(0, 0, -1)).toBe('z');
-    expect(dominantAxis(0, 0, 1)).toBe('z');
-    expect(dominantAxis(1, 0, 0)).toBe('x');
-    expect(dominantAxis(-1, 0, 0)).toBe('x');
-    expect(dominantAxis(0, 1, 0)).toBe('y');
-    expect(dominantAxis(0, -1, 0)).toBe('y');
-  });
-
-  it('is deterministic on a degenerate normal rather than throwing mid-load', () => {
+  it('reads a face plane off its normal, either way along the axis', () => {
+    expect([dominantAxis(0, 0, -1), dominantAxis(0, 0, 1)]).toEqual(['z', 'z']);
+    expect([dominantAxis(1, 0, 0), dominantAxis(-1, 0, 0)]).toEqual(['x', 'x']);
+    expect([dominantAxis(0, 1, 0), dominantAxis(0, -1, 0)]).toEqual(['y', 'y']);
+    // Deterministic on a degenerate normal rather than throwing mid-load.
     expect(dominantAxis(0, 0, 0)).toBe('y');
   });
 });
 
 describe('computeTileUVs over a merged run', () => {
-  it.each([2, 5, 20])('spans exactly N UV units across a run of N tiles', (n: number) => {
-    const { positions, normals } = pack(southRun(n));
-    const uvs = computeTileUVs(positions, normals);
-
-    expect(uvs.length).toBe((positions.length / 3) * 2);
+  it.each([2, 5, 20])('spans exactly N UV units across a run of %i tiles', (n: number) => {
+    const uvs = uvsOf(southRun(n));
+    expect(uvs.length).toBe(n * 4 * 2);
     const bounds = uvBounds(uvs);
     // US3-S5: N tiles, N repeats. One stretched brick would read as a span of 1.
     expect(bounds.maxU - bounds.minU).toBeCloseTo(n, 10);
     // And the wall's own height, which is two tiles, is two repeats.
     expect(bounds.maxV - bounds.minV).toBeCloseTo((CEILING_Y - FLOOR_Y) / UV_TILE_EDGE, 10);
-  });
-
-  it('places each quad on its own tile so the merge boundary is not a UV boundary', () => {
-    const n = 20;
-    const { positions, normals } = pack(southRun(n));
-    const uvs = computeTileUVs(positions, normals);
-
+    // Each quad sits on its own tile, so the merge boundary is not a UV boundary.
     for (let q = 0; q < n; q += 1) {
-      const quadUs = [0, 1, 2, 3].map((i) => uvAt(uvs, q * 4 + i)[0]);
-      expect(Math.min(...quadUs)).toBeCloseTo(q, 10);
-      expect(Math.max(...quadUs)).toBeCloseTo(q + 1, 10);
+      const us = [0, 1, 2, 3].map((i) => uvAt(uvs, q * 4 + i)[0]);
+      expect(Math.min(...us)).toBeCloseTo(q, 10);
+      expect(Math.max(...us)).toBeCloseTo(q + 1, 10);
     }
   });
 
-  it('agrees exactly at every shared edge inside the run', () => {
+  it('agrees exactly at every shared edge inside the run (US3-S6)', () => {
     const n = 20;
-    const { positions, normals } = pack(southRun(n));
-    const uvs = computeTileUVs(positions, normals);
-
+    const uvs = uvsOf(southRun(n));
+    // Vertices 1 and 2 of quad q sit on the same world edge as vertices 0 and 3
+    // of quad q+1: same world point, therefore same UV, within the epsilon.
     for (let q = 0; q + 1 < n; q += 1) {
-      // Vertex 1 and 2 of quad q sit on the same world edge as vertex 0 and 3 of
-      // quad q+1. Same world point, therefore same UV, within the declared epsilon.
-      const pairs: [number, number][] = [
-        [q * 4 + 1, (q + 1) * 4 + 0],
+      for (const [a, b] of [
+        [q * 4 + 1, (q + 1) * 4],
         [q * 4 + 2, (q + 1) * 4 + 3],
-      ];
-      for (const [a, b] of pairs) {
-        const [ua, va] = uvAt(uvs, a);
-        const [ub, vb] = uvAt(uvs, b);
-        expect(Math.abs(ua - ub)).toBeLessThanOrEqual(UV_AGREEMENT_EPSILON);
-        expect(Math.abs(va - vb)).toBeLessThanOrEqual(UV_AGREEMENT_EPSILON);
+      ]) {
+        expect(Math.abs(uvAt(uvs, a!)[0] - uvAt(uvs, b!)[0])).toBeLessThanOrEqual(UV_AGREEMENT_EPSILON);
+        expect(Math.abs(uvAt(uvs, a!)[1] - uvAt(uvs, b!)[1])).toBeLessThanOrEqual(UV_AGREEMENT_EPSILON);
       }
     }
   });
 
   it('is unchanged by where the run starts, so tiling is continuous level-wide', () => {
-    const near = pack(southRun(3, 0));
-    const far = pack(southRun(3, 7));
-    const here = computeTileUVs(near.positions, near.normals);
-    const there = computeTileUVs(far.positions, far.normals);
+    const here = uvsOf(southRun(3, 0));
+    const there = uvsOf(southRun(3, 7));
     for (let v = 0; v < here.length / 2; v += 1) {
       // Seven tiles along is seven UV units along: the same texel of the same brick.
       expect(uvAt(there, v)[0] - uvAt(here, v)[0]).toBeCloseTo(7, 10);
@@ -140,78 +117,49 @@ describe('computeTileUVs over a merged run', () => {
   });
 });
 
+// Every quad's UV extent equals its world extent in tiles on both axes; a face
+// whose texture is stretched fails this whatever its span happens to be.
 describe('no face is stretched', () => {
-  // Every quad's UV extent equals its world extent in tiles on both axes. A face
-  // whose texture is stretched fails this whatever its span happens to be.
-  const cases: { name: string; quads: Quad[]; du: number; dv: number }[] = [
-    { name: 'a south wall face', quads: southRun(1), du: 1, dv: 2 },
-    {
-      name: 'a west wall face',
-      quads: [
-        {
-          corners: [0, FLOOR_Y, 0, 0, FLOOR_Y, 1, 0, CEILING_Y, 1, 0, CEILING_Y, 0],
-          normal: [-1, 0, 0],
-        },
-      ],
-      du: 1,
-      dv: 2,
-    },
-    {
-      name: 'a floor tile',
-      quads: [
-        {
-          corners: [3, FLOOR_Y, 4, 3, FLOOR_Y, 5, 4, FLOOR_Y, 5, 4, FLOOR_Y, 4],
-          normal: [0, 1, 0],
-        },
-      ],
-      du: 1,
-      dv: 1,
-    },
-    {
-      name: 'a ceiling tile',
-      quads: [
-        {
-          corners: [3, CEILING_Y, 4, 4, CEILING_Y, 4, 4, CEILING_Y, 5, 3, CEILING_Y, 5],
-          normal: [0, -1, 0],
-        },
-      ],
-      du: 1,
-      dv: 1,
-    },
+  const west: Quad = {
+    corners: [0, FLOOR_Y, 0, 0, FLOOR_Y, 1, 0, CEILING_Y, 1, 0, CEILING_Y, 0],
+    normal: [-1, 0, 0],
+  };
+  const floor: Quad = {
+    corners: [3, FLOOR_Y, 4, 3, FLOOR_Y, 5, 4, FLOOR_Y, 5, 4, FLOOR_Y, 4],
+    normal: [0, 1, 0],
+  };
+  const cases: [string, Quad, number, number][] = [
+    ['a south wall face', southRun(1)[0]!, 1, 2],
+    ['a west wall face', west, 1, 2],
+    ['a floor tile', floor, 1, 1],
+    // The ceiling's own faces are covered over 002's emitted geometry below.
   ];
 
-  it.each(cases)('$name spans its world extent in tiles', ({ quads, du, dv }) => {
-    const { positions, normals } = pack(quads);
-    const bounds = uvBounds(computeTileUVs(positions, normals));
+  it.each(cases)('%s spans its world extent in tiles', (_name, quad, du, dv) => {
+    const bounds = uvBounds(uvsOf([quad]));
     expect(bounds.maxU - bounds.minU).toBeCloseTo(du, 10);
     expect(bounds.maxV - bounds.minV).toBeCloseTo(dv, 10);
   });
 });
 
-describe('two faces meeting at a corner', () => {
-  // The outer corner of a solid block at tile (4,4): its south face and its east
-  // face share the vertical edge at x=5, z=5.
-  const south: Quad = {
-    corners: [4, FLOOR_Y, 5, 5, FLOOR_Y, 5, 5, CEILING_Y, 5, 4, CEILING_Y, 5],
-    normal: [0, 0, 1],
-  };
-  const east: Quad = {
-    corners: [5, FLOOR_Y, 5, 5, FLOOR_Y, 4, 5, CEILING_Y, 4, 5, CEILING_Y, 5],
-    normal: [1, 0, 0],
-  };
+// The outer corner of a solid block: a south face and an east face sharing the
+// vertical edge at x=5, z=5.
+describe('two faces meeting at a corner (US3-S6)', () => {
+  const corner: Quad[] = [
+    { corners: [4, FLOOR_Y, 5, 5, FLOOR_Y, 5, 5, CEILING_Y, 5, 4, CEILING_Y, 5], normal: [0, 0, 1] },
+    { corners: [5, FLOOR_Y, 5, 5, FLOOR_Y, 4, 5, CEILING_Y, 4, 5, CEILING_Y, 5], normal: [1, 0, 0] },
+  ];
 
   it('agrees on height at the shared edge within the declared epsilon', () => {
-    const { positions, normals } = pack([south, east]);
-    const uvs = computeTileUVs(positions, normals);
-    // South vertex 1 (5,0,5) and east vertex 0 (5,0,5) are the same world point.
-    expect(Math.abs(uvAt(uvs, 1)[1] - uvAt(uvs, 4)[1])).toBeLessThanOrEqual(UV_AGREEMENT_EPSILON);
-    // And the top of that same edge: south vertex 2, east vertex 3.
-    expect(Math.abs(uvAt(uvs, 2)[1] - uvAt(uvs, 7)[1])).toBeLessThanOrEqual(UV_AGREEMENT_EPSILON);
+    const uvs = uvsOf(corner);
+    // South 1 and east 0 are one world point; south 2 and east 3 are its top.
+    for (const [a, b] of [[1, 4], [2, 7]]) {
+      expect(Math.abs(uvAt(uvs, a!)[1] - uvAt(uvs, b!)[1])).toBeLessThanOrEqual(UV_AGREEMENT_EPSILON);
+    }
   });
 
   it('meets on a whole-tile boundary, so the pattern continues rather than breaking', () => {
-    const { positions, normals } = pack([south, east]);
-    const uvs = computeTileUVs(positions, normals);
+    const uvs = uvsOf(corner);
     for (const vertex of [1, 2, 4, 7]) {
       const u = uvAt(uvs, vertex)[0];
       expect(Math.abs(u - Math.round(u))).toBeLessThanOrEqual(UV_AGREEMENT_EPSILON);
@@ -219,16 +167,15 @@ describe('two faces meeting at a corner', () => {
   });
 });
 
+// A 6-tile corridor with a solid border: the south side of the top wall is one
+// merged run of six tiles, which is precisely US3-S5's premise.
 describe('over the faces 002 actually emits', () => {
-  // A 6-tile corridor with a solid border: the south side of the top wall is one
-  // merged run of six tiles, which is precisely US3-S5's premise.
   const grid = ['11111111', '10000001', '11111111'];
 
   it('spans one UV unit per tile across the emitted run', () => {
     const faces = emitFaces(grid);
     const wall = faces.walls['1']!;
     const uvs = computeTileUVs(wall.positions, wall.normals);
-
     // Isolate the south-facing quads standing on z = 1: the top wall's inner face.
     const us: number[] = [];
     for (let q = 0; q * 4 < wall.positions.length / 3; q += 1) {
@@ -239,11 +186,9 @@ describe('over the faces 002 actually emits', () => {
     }
     expect(us.length).toBe(6 * 4);
     expect(Math.max(...us) - Math.min(...us)).toBeCloseTo(6, 10);
-  });
 
-  it('rewrites every emitted vertex, floor and ceiling included', () => {
-    const faces = emitFaces(grid);
-    for (const data of [faces.floor, faces.ceiling, faces.walls['1']!]) {
+    // And every emitted vertex is rewritten, floor and ceiling included.
+    for (const data of [faces.floor, faces.ceiling, wall]) {
       const uvs = computeTileUVs(data.positions, data.normals);
       expect(uvs.length).toBe((data.positions.length / 3) * 2);
       expect([...uvs].every((value) => Number.isFinite(value))).toBe(true);
@@ -256,15 +201,10 @@ describe('over the faces 002 actually emits', () => {
 });
 
 describe('refusals', () => {
-  it('rejects a normal array that does not match the positions', () => {
-    expect(() => computeTileUVs(new Float32Array(12), new Float32Array(9))).toThrow(
-      /positions and normals/i,
-    );
-  });
-
-  it('rejects a position array that is not whole vertices', () => {
-    expect(() => computeTileUVs(new Float32Array(11), new Float32Array(11))).toThrow(
-      /multiple of 3/i,
-    );
+  it('rejects arrays that disagree, or that are not whole vertices', () => {
+    const mismatched = () => computeTileUVs(new Float32Array(12), new Float32Array(9));
+    expect(mismatched).toThrow(/positions and normals/i);
+    const partial = () => computeTileUVs(new Float32Array(11), new Float32Array(11));
+    expect(partial).toThrow(/multiple of 3/i);
   });
 });
