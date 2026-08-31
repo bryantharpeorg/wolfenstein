@@ -1,9 +1,17 @@
 /**
  * The keys system: the render and DOM edge of US2's inventory. Every decision
  * lives in `src/interaction/` and is tested without a page; this file builds a
- * pickup mesh per key on 002's spawn table, collects on the player's tile,
- * registers the lock gate on US1's door machine, and publishes the counts and the
- * named refusal to `__diag.interaction` (FR-008, FR-009, FR-010, US2-S8).
+ * pickup mesh per key on 002's spawn table, registers the lock gate on US1's door
+ * machine, and publishes the counts and the named refusal to `__diag.interaction`
+ * (FR-008, FR-009, FR-010, US2-S8).
+ *
+ * Collection itself is no longer here. 007 US3 routes every pickup — keys included
+ * — through one path in `src/combat/pickups.ts`, so that a key is collected by the
+ * same radius test as health, ammo and treasure and there is not a second
+ * mechanism for it (007 FR-015, US3-S9). What that path calls back into is
+ * `addKey` and the run state below: the inventory, the meshes and `consumed` are
+ * still this file's, and `KeyPickup.consumed` still means exactly what FR-008 says
+ * it means.
  *
  * `src/main.ts` is not edited — 001's glob discovery finds this file — and neither
  * is the doors system: the lock reaches the door through the gate registry, which
@@ -14,7 +22,7 @@ import { defineSystem, type GameContext } from '../../boot/registry';
 import { DOOR_LOCKS, FLOOR_Y, ITEM_SPAWNS, TILE_SIZE } from '../../level';
 import { registerDoorGate } from '../../interaction/gate-registry';
 import { createInventory, keyCounts, type KeyInventory, type KeyKind } from '../../interaction/keys';
-import { buildKeyPickups, collectKeyPickupAt, type KeyPickup } from '../../interaction/pickups';
+import { buildKeyPickups, type KeyPickup } from '../../interaction/pickups';
 import { lockGate } from '../../interaction/locks';
 import {
   ensureInteractionDiag,
@@ -81,25 +89,6 @@ function buildMeshes(ctx: GameContext): void {
   }
 }
 
-function collectAtPlayer(ctx: GameContext): void {
-  const player = ctx.diag.player;
-  if (player == null) return;
-
-  const collected = collectKeyPickupAt(
-    pickups,
-    Math.floor(player.x / TILE_SIZE),
-    Math.floor(player.z / TILE_SIZE),
-    inventory,
-  ).collected;
-  if (!collected) return;
-
-  // The pickup is consumed, so its mesh goes with it; re-entering the tile yields
-  // nothing, which is what `consumed` means (FR-008, US2-S2). Hidden rather than
-  // removed, so 007's restart can put it back; an invisible mesh draws nothing.
-  for (const [pickup, mesh] of meshes) mesh.visible = !pickup.consumed;
-  publishKeys();
-}
-
 defineSystem({
   name: 'keys',
   // After the doors system (45): the gate is registered either way, but the
@@ -121,10 +110,8 @@ defineSystem({
 
     buildMeshes(ctx);
   },
-  update(ctx) {
+  update() {
     if (interaction == null) return;
-
-    collectAtPlayer(ctx);
 
     if (refusedKey != null) {
       // The doors system already recorded the reason; this names the key it
