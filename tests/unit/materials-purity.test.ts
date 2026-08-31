@@ -49,8 +49,13 @@ describe('generating-path purity', () => {
     );
   });
 
-  it.each(materialFiles)('%s imports three nowhere', (path: string) => {
-    expect(THREE_IMPORT.test(sources.get(path)!)).toBe(false);
+  // FR-011 declares one adapter here, so the rule is not "nothing imports
+  // three" but "one declared file does" — which fails if a second starts to.
+  it('imports three in the one declared adapter and nowhere else', () => {
+    const importers = materialFiles.filter((path) => THREE_IMPORT.test(sources.get(path)!));
+    expect(importers.map((path) => path.slice(MATERIALS_DIR.length))).toEqual([
+      'texture-adapter.ts',
+    ]);
   });
 
   it.each(materialFiles)('%s touches no browser API', (path: string) => {
