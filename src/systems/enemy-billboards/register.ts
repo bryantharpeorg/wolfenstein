@@ -19,6 +19,7 @@ import {
   type GuardBillboard,
 } from '../../enemy/billboard';
 import { buildGuardSheet, guardSheetStats } from '../../enemy/sprite-sheet';
+import { DEATH_DURATION_MS, DEATH_FRAMES } from '../../enemy/sprite-shape';
 import { countAlive, ensureEnemyDiag, type EnemyDiagnostic } from '../../enemy/enemy-diag';
 import { bearingFromDelta } from '../../enemy/view-angle';
 import { readAdopted, resolveGuardSource, spawnFallbackGuards } from './guard-source';
@@ -67,6 +68,21 @@ export interface EnemyViewHook {
   /** Whether each guard's quad was drawn on the last pass, in `guards()` order:
    *  US4-S8 read one guard at a time rather than as a total. */
   visibility(): boolean[];
+  /** The sheet frame each guard's quad currently shows, in `guards()` order —
+   *  how US4-S5's death animation is watched from outside the page. */
+  frames(): string[];
+  /** The built sheet's shape, so the harness asserts US4-S2's dimensions
+   *  against the canvas that actually exists rather than against the plan. */
+  sheet(): {
+    cell: number;
+    width: number;
+    height: number;
+    canvasWidth: number;
+    canvasHeight: number;
+    frames: string[];
+    deathFrames: string[];
+    deathDurationMs: number;
+  };
   /** Drops the override and hands the camera back to the player systems. */
   release(): void;
   /** Hides or shows every billboard, so the harness can measure what the guards
@@ -194,6 +210,21 @@ function installViewHook(ctx: GameContext): void {
       return [...entries.values()].map((entry) => entry.record.viewAngle);
     },
     visibility: () => [...entries.values()].map((entry) => entry.visible),
+    frames: () =>
+      [...entries.values()].map((entry) => entry.billboard.plan.frames[entry.billboard.frameIndex] ?? ''),
+    sheet() {
+      const built = buildGuardSheet(GUARD_TYPE);
+      return {
+        cell: built.plan.cell,
+        width: built.plan.width,
+        height: built.plan.height,
+        canvasWidth: built.canvas.width,
+        canvasHeight: built.canvas.height,
+        frames: [...built.plan.frames],
+        deathFrames: [...DEATH_FRAMES],
+        deathDurationMs: DEATH_DURATION_MS,
+      };
+    },
     release() {
       override = null;
     },

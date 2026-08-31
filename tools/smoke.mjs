@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { resolve, extname, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { walkAndReport } from './check-no-binaries.mjs';
 import { SMOKE_FPS_FLOOR } from './smoke-floor.mjs';
+import { runCheckModules } from './smoke-check-runner.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -689,55 +690,6 @@ async function runLockedDoorPass(browser, url) {
   }
 
   return finish();
-}
-
-// The check-module loop, mirroring `src/boot/discover.ts`: every
-// `tools/smoke-checks/*.mjs` is loaded and run against a freshly loaded page, so
-// a story adds a runtime assertion by adding a file rather than by editing this
-// harness. An index or a call site here would put every story's one line on
-// adjacent lines of one shared file, which is the conflict the glob removes.
-//
-// A check module exports `run({ page, url })` and returns an array of failure
-// messages — empty when it passes. It may also export a one-line `description`.
-async function runCheckModules(browser, url) {
-  const dir = resolve(__dirname, 'smoke-checks');
-  if (!existsSync(dir)) return [];
-
-  const files = readdirSync(dir)
-    .filter((name) => name.endsWith('.mjs'))
-    .sort();
-  const errors = [];
-
-  for (const file of files) {
-    const module = await import(pathToFileURL(resolve(dir, file)).href);
-    const check = module.run ?? module.default;
-    if (typeof check !== 'function') {
-      errors.push(`${file}: exports no run() function`);
-      continue;
-    }
-
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-    const page = await context.newPage();
-    const pageErrors = [];
-    page.on('pageerror', (error) => pageErrors.push(`${file}: pageerror: ${error.message}`));
-
-    try {
-      await page.goto(url, { waitUntil: 'load' });
-      await page.waitForFunction(() => window.__diag != null && window.__diag.ready === true, {
-        timeout: 15000,
-      });
-      const found = (await check({ page, url })) ?? [];
-      errors.push(...found.map((message) => `${file}: ${message}`));
-    } catch (error) {
-      errors.push(`${file}: threw ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    errors.push(...pageErrors);
-    await context.close();
-    console.log(`Smoke check ${file}: ${module.description ?? 'ran'}`);
-  }
-
-  return errors;
 }
 
 async function main() {

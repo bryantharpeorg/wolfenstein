@@ -205,10 +205,93 @@ export async function run({ page }) {
     );
   }
 
+  // US4-S2 on the page rather than in the plan: the canvas that was actually
+  // built is `8 * cell` by `frames * cell`.
+  const sheet = await page.evaluate(() => window.__enemyView.sheet());
+  if (sheet.width !== 8 * sheet.cell || sheet.height !== sheet.frames.length * sheet.cell) {
+    errors.push(
+      `the sheet is ${sheet.width}x${sheet.height}, not ${8 * sheet.cell}x${
+        sheet.frames.length * sheet.cell
+      } for 8 angles and ${sheet.frames.length} frames`,
+    );
+  }
+  if (sheet.canvasWidth !== sheet.width || sheet.canvasHeight !== sheet.height) {
+    errors.push(
+      `the canvas is ${sheet.canvasWidth}x${sheet.canvasHeight}, not the declared ${sheet.width}x${sheet.height}`,
+    );
+  }
+
+  // US4-S5 and US4-S6: a guard put into `death` animates through the declared
+  // death frames over the declared duration, holds the last one, and stops
+  // counting toward `enemiesAlive`. The state is set on the published record,
+  // which is the same object the renderer reads.
+  const death = await page.evaluate(async (durationMs) => {
+    const frames = (count) =>
+      new Promise((resolve) => {
+        let seen = 0;
+        const tick = () => {
+          seen += 1;
+          if (seen >= count) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+    const view = window.__enemyView;
+    const target = view.guards()[0];
+    view.orbit(target.x, target.z + 3, target.x, target.z);
+    await frames(2);
+
+    const aliveBefore = window.__diag.enemiesAlive;
+    window.__diag.enemies[0].state = 'death';
+    await frames(2);
+    const first = view.frames()[0];
+    const aliveAfter = window.__diag.enemiesAlive;
+
+    const seen = new Set([first]);
+    const deadline = performance.now() + durationMs + 400;
+    while (performance.now() < deadline) {
+      await frames(2);
+      seen.add(view.frames()[0]);
+    }
+    const held = view.frames()[0];
+    await frames(20);
+    const stillHeld = view.frames()[0];
+    view.release();
+    return { aliveBefore, aliveAfter, first, seen: [...seen], held, stillHeld };
+  }, sheet.deathDurationMs);
+
+  if (death.first !== sheet.deathFrames[0]) {
+    errors.push(
+      `a guard entering death showed '${death.first}', not the first death frame '${sheet.deathFrames[0]}'`,
+    );
+  }
+  for (const frame of sheet.deathFrames) {
+    if (!death.seen.includes(frame)) {
+      errors.push(
+        `the death animation never showed '${frame}' over its declared ${sheet.deathDurationMs}ms ` +
+          `(saw ${death.seen.join(', ')})`,
+      );
+    }
+  }
+  const finalFrame = sheet.deathFrames[sheet.deathFrames.length - 1];
+  if (death.held !== finalFrame || death.stillHeld !== finalFrame) {
+    errors.push(
+      `the death animation ended on '${death.held}' then '${death.stillHeld}', not holding '${finalFrame}'`,
+    );
+  }
+  if (death.aliveAfter !== death.aliveBefore - 1) {
+    errors.push(
+      `__diag.enemiesAlive is ${death.aliveAfter} after a guard entered death, not ${
+        death.aliveBefore - 1
+      }`,
+    );
+  }
+
   if (errors.length === 0) {
     console.log(
       `  eight bearings read view angles [${angles.join(', ')}]; ` +
-        `${budget.restored.drawn} visible guards cost ${cost} draw calls`,
+        `${budget.restored.drawn} visible guards cost ${cost} draw calls; ` +
+        `death ran ${death.seen.join(' -> ')} and held ${death.stillHeld}`,
     );
   }
 
