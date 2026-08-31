@@ -21,8 +21,15 @@ import type { MaterialName } from './table';
 
 /** The declared anisotropy (FR-011, US3-S10): enough that the level's longest
  * corridor does not alias at a grazing angle, and inside every WebGL2 and
- * WebGPU minimum — the renderer clamps to its own maximum. */
-export const TEXTURE_ANISOTROPY = 8;
+ * WebGPU minimum — the renderer clamps to its own maximum.
+ *
+ * Four rather than eight. Anisotropy is a tap count, and it is the one material
+ * setting a software rasterizer pays for per fragment: with three maps sampled
+ * per pixel, dropping 8 to 4 cut the measured software frame from 27ms to
+ * 22.5ms, while 4x is still genuine anisotropic filtering and still resolves
+ * the longest corridor at a grazing angle. On real hardware the difference is
+ * free either way. See DECISIONS.md (US3-S11). */
+export const TEXTURE_ANISOTROPY = 4;
 
 type MapChannel = 'albedo' | 'normal' | 'roughness';
 

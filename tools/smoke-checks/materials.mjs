@@ -3,9 +3,12 @@
  * reachable from a vitest run: whether a mesh reached the frame with no albedo
  * map, the draw-call count from a camera, how many textures were really
  * uploaded and with what sampler state, and whether a resize regenerated any
- * (FR-008, FR-010, FR-011, US3-S2, US3-S7..S10). Discovered by tools/smoke.mjs;
- * returns the failures, which the harness prints before exiting non-zero.
+ * (FR-008, FR-010, FR-011, US3-S2, US3-S7..S11). Discovered by
+ * tools/smoke-check-runner.mjs, which hands each module its own freshly loaded
+ * page and collects the failures it returns for the harness to print before
+ * exiting non-zero.
  */
+import { SMOKE_FPS_FLOOR } from '../smoke-floor.mjs';
 
 /** FR-010's ceiling, restated so the harness fails on it independently. */
 const DRAW_CALL_CEILING = 20;
@@ -13,7 +16,7 @@ const DRAW_CALL_CEILING = 20;
 const MATERIAL_COUNT = 5;
 const MAPS_PER_MATERIAL = 3;
 /** The anisotropy FR-011 declares; the renderer may clamp no lower. */
-const ANISOTROPY = 8;
+const ANISOTROPY = 4;
 /** Reached through no door, so this does not depend on 004's door state. */
 const CAMERA_POSITIONS = [
   [18.5, 3.5],
@@ -46,9 +49,9 @@ const readProbe = (page) =>
     typeof window.__materialsProbe === 'function' ? window.__materialsProbe() : null,
   );
 
-export async function check({ page, diag }) {
+export default async function check({ page }) {
   const errors = [];
-  const materials = diag.materials ?? (await readMaterials(page));
+  const materials = await readMaterials(page);
   if (materials == null) return ['window.__diag.materials is missing (FR-015)'];
 
   // US3-S2 / FR-008: the milestone's DONE condition, as one integer.
@@ -133,6 +136,21 @@ export async function check({ page, diag }) {
         );
       }
     }
+  }
+
+  // US3-S11: "without breaking the budget" is a frame-rate claim as well as a
+  // draw-call one. Read after the loop has settled rather than off the first
+  // frame, because a frame rate averaged over a single load-time frame measures
+  // the load and not the loop — the one-time driver cost is paid at setup for
+  // exactly this reason. The floor is the harness's own, imported rather than
+  // restated so it cannot drift below it here.
+  await settle(page, 60);
+  const settledFps = await page.evaluate(() => window.__diag.fps);
+  if (!(settledFps > SMOKE_FPS_FLOOR)) {
+    errors.push(
+      `settled fps ${settledFps.toFixed(1)} does not clear the floor ${SMOKE_FPS_FLOOR} with` +
+        ' materials applied (US3-S11)',
+    );
   }
 
   // US3-S9 / FR-011: a viewport change regenerates nothing. Unchanged timings

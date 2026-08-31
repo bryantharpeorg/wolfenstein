@@ -1,38 +1,18 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { resolve, extname, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { walkAndReport } from './check-no-binaries.mjs';
 import { SMOKE_FPS_FLOOR } from './smoke-floor.mjs';
+// One line per story, forever: every tools/smoke-checks/*.mjs runs, discovered.
+import { runSmokeChecks } from './smoke-check-runner.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
-
-// 005 T030: a spec adds a runtime assertion by adding tools/smoke-checks/<name>.mjs,
-// never by editing this file — the glob seam src/boot/discover.ts already uses. A
-// module exports check({ page, diag, url }) and returns its failure messages.
-async function runSmokeChecks(context) {
-  const dir = resolve(__dirname, 'smoke-checks');
-  if (!existsSync(dir)) return [];
-  const errors = [];
-  for (const file of readdirSync(dir).filter((name) => name.endsWith('.mjs')).sort()) {
-    const module = await import(pathToFileURL(resolve(dir, file)).href);
-    if (typeof module.check !== 'function') {
-      errors.push(`tools/smoke-checks/${file} exports no check() function`);
-      continue;
-    }
-    try {
-      errors.push(...(await module.check(context)).map((message) => `${file}: ${message}`));
-    } catch (error) {
-      errors.push(`${file}: threw ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  return errors;
-}
 
 const dist = resolve(root, 'dist');
 
@@ -474,8 +454,6 @@ async function runNormalPass(browser, url, expectedCounts) {
   // there and times out rather than reaching this line. Asserting the floats
   // differ adds no coverage and subtracts determinism.
 
-  errors.push(...(await runSmokeChecks({ page, diag: result.diag, url })));
-
   await context.close();
   return { diag: result.diag, errors };
 }
@@ -805,6 +783,14 @@ async function main() {
       fail('Locked door smoke pass failed');
     }
     console.log('Locked door smoke pass: refused by name, then opened with the key it named');
+
+    const checkFailures = await runSmokeChecks(browser, url, root);
+    if (checkFailures.length > 0) {
+      for (const failure of checkFailures) {
+        console.error(failure);
+      }
+      fail('Smoke check modules failed');
+    }
 
     const noGpu = await runSmokePass(
       browser,
