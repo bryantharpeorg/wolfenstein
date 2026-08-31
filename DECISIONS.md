@@ -67,14 +67,19 @@ let the operator answer.
 - 2026-08-30 | 004-interaction | `secretRemainingTiles` is added to `InteractionDiagnostics` by augmentation from `secret-field.ts`: US3-S6 wants the shortfall in diagnostics, and US1 owns that file.
 - 2026-08-30 | 004-interaction | The secrets system installs its own `keydown` listener resolving through the one `bindings.ts` table, and records a reason only when a secret was in reach: FR-005 binds one command *path*, not one listener.
 - 2026-08-30 | 004-interaction | The tile a pushed wall rests on is not re-blocked for collision: the passable-tile registry only adds tiles, and inverting it would mean editing `open-state.ts` and 003's collider, which no US3 task owns.
-<<<<<<< HEAD
 - 2026-08-31 | 006-enemies | `stepGuard` returns a fresh record and advances only the `Rng` in place, reporting `randomConsumed` per tick — that flag is what lets US1-S9 assert a different seed diverges only where randomness was drawn.
 - 2026-08-31 | 006-enemies | Idle patrol draws heading and jitter every idle tick, using the heading only when due — the generator's position then depends on the tick count, never on a branch, which is what makes the trace exact.
 - 2026-08-31 | 006-enemies | `StepContext.doorStates` is 004's open-tile key set, not a second door-state shape — `openTiles()` produces it and `isTileBlocking` consumes it already.
 - 2026-08-31 | 006-enemies | A chasing guard moves only along a path the injected world returned — a discarded stale path then costs one throttle interval of standing still, not a beeline to nowhere.
 - 2026-08-31 | 006-enemies | The guard record splits into `src/enemy/guard.ts`, one module beyond plan.md's sketch — `step.ts` crossed the 400-line ceiling, and Article IV makes the split part of the task.
-=======
 - 2026-08-31 | 005-materials | `generateMaterial(spec, size)` is the pure function FR-003 is stated over and `generateAlbedo(name, size)` is the memoized entry point over the table — one function cannot be both byte-reproducible under an arbitrary seed and cached per name.
 - 2026-08-31 | 005-materials | A seed is varied through `reseed(spec, seed)` in `table.ts`, not by spreading a spec at the call site — `MaterialSpec` is a discriminated union, and a spread loses the correlation between a material's name and its own parameter block.
 - 2026-08-31 | 005-materials | `MEAN_DISTINCTNESS_THRESHOLD` is 8 channel units while the five materials are tuned to a smallest measured gap of ~23 (brick 80, blood-stone 57, wood 108, stone 149, steel 182) — the threshold is the floor a retune must clear, not the spread itself.
->>>>>>> origin/main
+- 2026-08-31 | 006-enemies | `findPath` returns `cells` beginning at the start cell rather than just after it — US2-S1 asks for a list "from start to goal", and a guard already standing on `cells[0]` arrives on it the same tick and slices it, so `step.ts` needs no change.
+- 2026-08-31 | 006-enemies | `MAX_NODE_EXPANSIONS` is 4096, one 64x64 grid of cells: a search may cover the whole level exactly once and no more, so the cap is a real bound without ever refusing a route the level actually has.
+- 2026-08-31 | 006-enemies | A* orders its open set by (f, h, cell index, insertion sequence) — a *total* order, which is what makes US2-S9's "two identical calls, identical paths" a property of the code rather than of the heap's history.
+- 2026-08-31 | 006-enemies | A diagonal corner is passable to sight when at least one of the two cells flanking it is open; only two walls close it, which is US2-S7's pinwheel and nothing wider.
+- 2026-08-31 | 006-enemies | `MAX_LOS_STEPS` is 512 — four times the longest span a 64x64 grid can produce, so the bound is unreachable in play and absolute in principle.
+- 2026-08-31 | 006-enemies | The `Navigator`'s throttle is a second belt over `step.ts`'s own: a suppressed request returns the cached path and is counted, so a guard asking every tick shows up in `NavReport` rather than in the frame time.
+- 2026-08-31 | 006-enemies | A claim reserves a guard's destination cell only, never its route — two guards may share a corridor, and only the cell they would grind against is made exclusive.
+- 2026-08-31 | 006-enemies | US1's purity check treats the bare word `navigator` as a DOM global, so `nav.ts` names its own type `Navigator` in prose; the gate is right that `navigator` is a global, and renaming the comment is cheaper than narrowing the check.
