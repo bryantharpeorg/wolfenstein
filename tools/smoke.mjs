@@ -740,6 +740,24 @@ const COMBAT_FIELDS = [
   'hudReady',
 ];
 
+// The 001-006 fields, named here as those specs shipped them. The interfaces are
+// read from source below and the page is checked against them, but a field
+// deleted from *both* would pass that check vacuously -- so the names themselves
+// are stated once, and a rename or a removal fails against this list (US4-S10).
+const LEGACY_DIAG_FIELDS = {
+  __diag: [
+    'ready', 'renderer', 'fps', 'frameTimeMs', 'drawCalls', 'errors', 'fallbackReason',
+    'level', 'enemies', 'enemiesAlive', 'enemySpawnErrors',
+  ],
+  '__diag.player': [
+    'x', 'z', 'yaw', 'pitch', 'speed', 'sprinting', 'pointerLocked', 'stuck', 'bobOffset',
+  ],
+  '__diag.interaction': [
+    'doorsTotal', 'doorsOpen', 'secretsFound', 'secretsTotal', 'keys', 'lastReason',
+    'lastRefusalKeyKind', 'keyConsumed',
+  ],
+};
+
 /** The 001-006 diagnostics contracts, each read from the interface that declares
  *  it, so "no existing field renamed, removed or repurposed" is checked against
  *  the shapes those specs actually shipped rather than against a list this file
@@ -887,6 +905,18 @@ async function runCombatLoopPass(browser, url, root) {
     return problems;
   }, contract);
   errors.push(...contractProblems.map((message) => `combat loop step '${step}': ${message}`));
+
+  // ...and the declarations themselves still carry what 001-006 shipped, so a
+  // field deleted from the interface as well as from the page cannot pass.
+  for (const [label, expected] of Object.entries(LEGACY_DIAG_FIELDS)) {
+    const declared = contract.find((group) => group.label === label);
+    const names = new Set((declared?.fields ?? []).map((field) => field.name));
+    const gone = expected.filter((field) => !names.has(field));
+    claim(
+      gone.length === 0,
+      `${label} no longer declares the 001-006 field(s) ${gone.join(', ')}: renamed or removed`,
+    );
+  }
 
   for (const field of COMBAT_FIELDS) {
     claim(
