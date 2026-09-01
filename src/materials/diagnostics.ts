@@ -12,8 +12,10 @@
 import type { Diagnostics } from '../diag/diag';
 import type { MaterialName } from './table';
 
-/** Which of a material's two derived maps could not be produced (FR-007). */
-export type MaterialMapKind = 'normal' | 'roughness';
+/** Which of a material's two derived maps could not be produced (FR-007), or
+ * `'binding'` for a surface whose declared material had to be substituted
+ * (FR-008). Additive: no existing kind changes meaning (FR-015). */
+export type MaterialMapKind = 'normal' | 'roughness' | 'binding';
 
 export interface MaterialFallback {
   readonly name: MaterialName;

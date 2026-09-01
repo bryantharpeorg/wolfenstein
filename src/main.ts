@@ -115,9 +115,26 @@ async function run() {
   window.addEventListener('resize', resize);
   resize();
 
+  // Frame deltas are measured with `performance.now()` at callback entry rather
+  // than from the timestamp requestAnimationFrame hands in.
+  //
+  // The two are the same clock, but the rAF argument is the start time of the
+  // browser's frame, and a frame that began *before* a long synchronous load
+  // still carries its original start time when its callbacks finally run. 005
+  // generates five 512px materials at load — FR-004 budgets up to 1500ms for it
+  // — so the first callback arrives with a timestamp from before that work, and
+  // the second frame's delta comes out as the whole load: ~466ms measured
+  // headlessly, against a 16.7ms steady state. That one bogus sample is handed
+  // to every system as `deltaMs`, teleporting the player and every door through
+  // half a second of simulation on frame two, and it drags `__diag.fps` — a
+  // 60-frame trailing mean the smoke harness reads two frames in — down to 4.
+  //
+  // Callback entry to callback entry is the interval the systems actually
+  // integrate over, and it cannot predate the loop that started them.
   let lastTime = performance.now();
 
-  function frame(now: number) {
+  function frame() {
+    const now = performance.now();
     const delta = now - lastTime;
     lastTime = now;
 

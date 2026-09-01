@@ -49,8 +49,14 @@ describe('generating-path purity', () => {
     );
   });
 
-  it.each(materialFiles)('%s imports three nowhere', (path: string) => {
+  it.each(materialFiles.filter((p) => !p.endsWith('texture-adapter.ts')))('%s imports three nowhere', (path: string) => {
     expect(THREE_IMPORT.test(sources.get(path)!)).toBe(false);
+  });
+
+  it('texture-adapter.ts is the only materials file that imports three', () => {
+    const adapter = materialFiles.find((p) => p.endsWith('texture-adapter.ts'));
+    expect(adapter).toBeDefined();
+    expect(THREE_IMPORT.test(sources.get(adapter!)!)).toBe(true);
   });
 
   it.each(materialFiles)('%s touches no browser API', (path: string) => {
