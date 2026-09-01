@@ -125,3 +125,56 @@ export function computeTileUVs(
   }
   return uvs;
 }
+
+/** Vertices per emitted quad, matching `src/geometry/faces.ts`'s layout. */
+const VERTICES_PER_QUAD = 4;
+
+/**
+ * How many quads carry a UV span that disagrees with their world extent in
+ * tiles — that is, how many faces are stretched or squashed (US4-S1).
+ *
+ * Pure, and therefore shared: the unit test asserts it over the built level,
+ * and the running page reports it through the materials probe, so the claim is
+ * made once and checked in both places rather than restated in the harness.
+ */
+export function countStretchedQuads(
+  positions: Float32Array,
+  normals: Float32Array,
+  uvs: Float32Array,
+  tileEdge: number = TILE_EDGE_UNITS,
+  epsilon: number = UV_AGREEMENT_EPSILON,
+): number {
+  const vertices = positions.length / 3;
+  if (uvs.length !== vertices * 2 || vertices % VERTICES_PER_QUAD !== 0) {
+    throw new Error(`UV buffer of ${uvs.length} does not describe ${vertices} quad vertices`);
+  }
+
+  let stretched = 0;
+  for (let quad = 0; quad < vertices / VERTICES_PER_QUAD; quad += 1) {
+    const first = quad * VERTICES_PER_QUAD;
+    const nx = Math.abs(normals[first * 3]!);
+    const ny = Math.abs(normals[first * 3 + 1]!);
+    const nz = Math.abs(normals[first * 3 + 2]!);
+    const uAxis = ny >= nx && ny >= nz ? 0 : nx >= nz ? 2 : 0;
+    const vAxis = ny >= nx && ny >= nz ? 2 : 1;
+
+    let worldU = 0;
+    let worldV = 0;
+    let spanU = 0;
+    let spanV = 0;
+    for (let a = 0; a < VERTICES_PER_QUAD; a += 1) {
+      for (let b = a + 1; b < VERTICES_PER_QUAD; b += 1) {
+        const pa = (first + a) * 3;
+        const pb = (first + b) * 3;
+        worldU = Math.max(worldU, Math.abs(positions[pa + uAxis]! - positions[pb + uAxis]!));
+        worldV = Math.max(worldV, Math.abs(positions[pa + vAxis]! - positions[pb + vAxis]!));
+        spanU = Math.max(spanU, Math.abs(uvs[(first + a) * 2]! - uvs[(first + b) * 2]!));
+        spanV = Math.max(spanV, Math.abs(uvs[(first + a) * 2 + 1]! - uvs[(first + b) * 2 + 1]!));
+      }
+    }
+    if (Math.abs(spanU - worldU / tileEdge) > epsilon || Math.abs(spanV - worldV / tileEdge) > epsilon) {
+      stretched += 1;
+    }
+  }
+  return stretched;
+}

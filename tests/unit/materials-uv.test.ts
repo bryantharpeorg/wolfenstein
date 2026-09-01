@@ -3,6 +3,7 @@ import { emitFaces, type FaceData } from '../../src/geometry/faces';
 import { LEVEL_GRID, TILE_SIZE } from '../../src/level';
 import {
   computeTileUVs,
+  countStretchedQuads,
   repeatDistance,
   TILE_EDGE_UNITS,
   uvSpan,
@@ -186,6 +187,21 @@ describe('every face of the built level (FR-009)', () => {
       }
     }
     expect(checked).toBeGreaterThan(100);
+  });
+
+  it('stretches none of them, and says so through the shared counter', () => {
+    for (const data of everyFaceData(LEVEL_GRID)) {
+      const uvs = computeTileUVs(data.positions, data.normals);
+      expect(countStretchedQuads(data.positions, data.normals, uvs)).toBe(0);
+    }
+  });
+
+  it('counts a face stretched when its UVs are the emitter\'s per-quad 0..1', () => {
+    // The pre-US4 UVs: every quad zero-to-one regardless of size. A 20-tile run
+    // wearing them is one stretched brick, which is the regression this counts.
+    const wall = emitFaces(RUN_GRID).walls['1']!;
+    const stretched = countStretchedQuads(wall.positions, wall.normals, wall.uvs);
+    expect(stretched).toBe(quadCount(wall));
   });
 
   it('spans the floor once per tile across the whole level, not once in total', () => {

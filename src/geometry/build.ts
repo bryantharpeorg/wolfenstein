@@ -46,6 +46,13 @@ function buildBufferGeometry(data: FaceData): BufferGeometry {
   return geometry;
 }
 
+/** Mesh names, so a surface's classification survives onto the scene graph. */
+export const FLOOR_MESH_NAME = 'floor';
+export const CEILING_MESH_NAME = 'ceiling';
+export function wallMeshName(type: string): string {
+  return `wall:${type}`;
+}
+
 function isWallType(type: string): boolean {
   return type >= '1' && type <= '9';
 }
@@ -70,17 +77,24 @@ export function buildLevelGeometry(
       fallbackTypes.push(type);
     }
     const geometry = buildBufferGeometry(faces.walls[type]!);
-    walls.push(new Mesh(geometry, new MeshStandardMaterial({ color: material.color })));
+    const mesh = new Mesh(geometry, new MeshStandardMaterial({ color: material.color }));
+    // The surface's classification, carried on the mesh (005 US4). A later
+    // system that skins these meshes needs to know which is which, and reading
+    // it off the object beats re-deriving it from vertex data.
+    mesh.name = wallMeshName(type);
+    walls.push(mesh);
   }
 
   const floor = new Mesh(
     buildBufferGeometry(faces.floor),
     new MeshStandardMaterial({ color: FLOOR_COLOR }),
   );
+  floor.name = FLOOR_MESH_NAME;
   const ceiling = new Mesh(
     buildBufferGeometry(faces.ceiling),
     new MeshStandardMaterial({ color: CEILING_COLOR }),
   );
+  ceiling.name = CEILING_MESH_NAME;
 
   return { walls, floor, ceiling, fallbackTypes };
 }

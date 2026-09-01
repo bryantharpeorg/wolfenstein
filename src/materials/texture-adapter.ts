@@ -27,6 +27,17 @@ import type { ColorSpace } from 'three';
 import type { MaterialMapSet } from './maps';
 import type { MaterialName } from './table';
 
+/**
+ * One material as the adapter needs it. Narrower than a `MaterialMapSet` on
+ * purpose: the height field the maps were derived from is the biggest buffer of
+ * the set and the renderer never reads it, so the upload path does not ask for
+ * it and a worker does not have to ship it back (T040).
+ */
+export type MaterialUpload = Pick<
+  MaterialMapSet,
+  'name' | 'size' | 'albedo' | 'normal' | 'roughness'
+>;
+
 /** The anisotropy level this project declares (FR-011, US4-S5). Sixteen is the
  *  common hardware ceiling; eight is the level a grazing corridor needs and is
  *  affordable everywhere. Clamped against what the renderer reports it can do,
@@ -72,7 +83,7 @@ export function createMapTexture(
 /** A standard material wearing one material's three maps. Uncached: the caller
  *  that wants sharing asks for `sharedMaterial`. */
 export function createStandardMaterial(
-  set: MaterialMapSet,
+  set: MaterialUpload,
   maxAnisotropy: number = TEXTURE_ANISOTROPY,
 ): MeshStandardMaterial {
   const anisotropy = resolveAnisotropy(maxAnisotropy);
@@ -97,7 +108,7 @@ const cache = new Map<MaterialName, MeshStandardMaterial>();
  * materials the level uses and not of how many meshes wear them.
  */
 export function sharedMaterial(
-  set: MaterialMapSet,
+  set: MaterialUpload,
   maxAnisotropy: number = TEXTURE_ANISOTROPY,
 ): MeshStandardMaterial {
   const cached = cache.get(set.name);
