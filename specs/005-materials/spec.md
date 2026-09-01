@@ -125,21 +125,19 @@ correctly across materials.
 
 ---
 
-### User Story 3 - Materials bound to merged geometry without breaking the budget (Priority: P1)
+### User Story 3 - Materials bound to merged geometry (Priority: P1)
 
 As a player, every surface in the level is textured — walls by type, doors, secrets,
-floor and ceiling — with the texture tiling once per world tile so a merged 20-tile wall
-run reads as twenty bricks rather than one stretched brick, and the whole level still
-costs fewer than 20 draw calls.
+floor and ceiling — with no surface left untextured, and the whole level still costs fewer
+than 20 draw calls.
 
 **Why this priority**: This is the milestone's DONE condition ("fully textured, no
 untextured surfaces") and the point where M1's draw-call achievement is most easily
 thrown away — a naive per-tile material assignment turns 4096 tiles into 4096 meshes.
 
-**Independent Test**: Build the level's geometry in a unit test and assert every emitted
-face carries UVs whose span equals its world-space extent in tiles; then load the built
-page headlessly and assert `window.__diag.drawCalls` is still under 20 and
-`window.__diag.materials.untexturedMeshes` is 0.
+**Independent Test**: Load the built page headlessly and assert
+`window.__diag.materials.untexturedMeshes` is 0 and `window.__diag.drawCalls` is still
+under 20.
 
 **Acceptance Scenarios**:
 
@@ -155,27 +153,59 @@ page headlessly and assert `window.__diag.drawCalls` is still under 20 and
    a door reads as a door before it is touched.
 4. **Given** floor and ceiling geometry from 002, **When** rendered, **Then** each carries
    its own declared material and neither samples a wall texture.
-5. **Given** a merged wall run spanning N tiles, **When** its UVs are read, **Then** the
-   UV span across that run equals N — one texture repeat per world tile — so tiling is
-   continuous across the merge and no face is stretched.
-6. **Given** two adjacent faces of the same material meeting at a corner, **When**
-   sampled at the shared edge, **Then** their UVs agree at that edge within a declared
-   epsilon; the texture does not visibly break at a merge boundary.
-7. **Given** the textured level, **When** `window.__diag.drawCalls` is read at any camera
+5. **Given** the textured level, **When** `window.__diag.drawCalls` is read at any camera
    position, **Then** it remains below 20 — the ceiling 002 FR-010 established survives
    this spec.
-8. **Given** the five materials, **When** the uploaded texture count is read, **Then**
+
+### User Story 4 - Tiling, texture economy and the frame budget (Priority: P1)
+
+As a player, the texture tiles once per world tile so a merged 20-tile wall run reads as
+twenty bricks rather than one stretched brick, surfaces stay sharp at grazing angles, and
+the textured level holds its frame rate with the enemy system live.
+
+**Why this priority**: US3 makes every surface textured; this story makes it *look* right
+and *cost* right. It is the half of the original US3 that owns derivation cost, and the
+half that the enemy system's frame budget collides with.
+
+**Independent Test**: Build the level's geometry in a unit test and assert every emitted
+face carries UVs whose span equals its world-space extent in tiles; then run
+`npm run smoke` with the enemy system live and assert it clears the declared FPS floor.
+
+**Acceptance Scenarios**:
+
+1. **Given** a merged wall run spanning N tiles, **When** its UVs are read, **Then** the
+   UV span across that run equals N — one texture repeat per world tile — so tiling is
+   continuous across the merge and no face is stretched.
+2. **Given** two adjacent faces of the same material meeting at a corner, **When**
+   sampled at the shared edge, **Then** their UVs agree at that edge within a declared
+   epsilon; the texture does not visibly break at a merge boundary.
+3. **Given** the five materials, **When** the uploaded texture count is read, **Then**
    exactly one set of maps exists per material, shared by every mesh using it, rather than
    one set per mesh.
-9. **Given** the running page, **When** the viewport is resized, **Then** no texture is
+4. **Given** the running page, **When** the viewport is resized, **Then** no texture is
    regenerated and generation time in diagnostics is unchanged.
-10. **Given** any textured surface viewed at a grazing angle across the level's longest
-    corridor, **When** rendered, **Then** mipmaps and a declared anisotropy level are in
-    effect and the surface does not alias into noise.
+5. **Given** any textured surface viewed at a grazing angle across the level's longest
+   corridor, **When** rendered, **Then** mipmaps and a declared anisotropy level are in
+   effect and the surface does not alias into noise.
+6. **Given** materials applied and the enemy system live, **When** `npm run smoke` runs on
+   a software renderer, **Then** it clears the declared FPS floor. The floor is not to be
+   lowered to pass this scenario; derivation cost may move (cache, defer, precompute at
+   build, generate off the animation frame) but coverage and visual assertions of US3 and
+   of this story's other scenarios stay intact.
 
 ---
 
-### User Story 4 - Shadow-mapped lights, ambient and fog (Priority: P2)
+**Operator amendment (2026-08-31, unratified until reviewed)**: the original US3 carried
+eleven scenarios spanning binding, UV geometry and texture economy, and could not be built
+inside the judge's 65,536-byte input budget — measured at **66,854**, **77,222** and
+**85,694** bytes across three independent attempts, every one of them with both gates
+green. The story was split here on its own seam: US3 keeps binding and coverage, the new
+US4 takes tiling, texture economy and the frame budget, and the former US4 (lights, ambient
+and fog) becomes US5 unchanged. **No required behaviour is added or removed** — every
+scenario of the original US3, including the perf scenario added earlier today as US3-S11,
+survives verbatim in one of the two halves. Feedback #84.
+
+### User Story 5 - Shadow-mapped lights, ambient and fog (Priority: P2)
 
 As a player, the level is lit rather than merely visible: point lights cast shadows onto
 walls and floor, an ambient term keeps unlit corners readable rather than black, and fog
@@ -375,8 +405,11 @@ US2:
   implements: [FR-005, FR-006, FR-007]
 US3:
   depends_on: [US2]
-  implements: [FR-008, FR-009, FR-010, FR-011]
+  implements: [FR-008, FR-010]
 US4:
   depends_on: [US3]
+  implements: [FR-009, FR-011]
+US5:
+  depends_on: [US4]
   implements: [FR-012, FR-013, FR-014, FR-015, FR-016]
 ```

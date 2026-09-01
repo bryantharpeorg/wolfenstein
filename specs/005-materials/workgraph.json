@@ -45,9 +45,7 @@
       "requirement_keys": [
         "US3",
         "FR-008",
-        "FR-009",
-        "FR-010",
-        "FR-011"
+        "FR-010"
       ],
       "depends_on": [
         "us2"
@@ -62,6 +60,22 @@
       "spec_ref": "005-materials:US4",
       "requirement_keys": [
         "US4",
+        "FR-009",
+        "FR-011"
+      ],
+      "depends_on": [
+        "us3"
+      ],
+      "depends_on_merged": [],
+      "timeout_override_s": null
+    },
+    {
+      "id": "us5",
+      "story_key": "US5",
+      "persona": "implementer",
+      "spec_ref": "005-materials:US5",
+      "requirement_keys": [
+        "US5",
         "FR-012",
         "FR-013",
         "FR-014",
@@ -69,7 +83,7 @@
         "FR-016"
       ],
       "depends_on": [
-        "us3"
+        "us4"
       ],
       "depends_on_merged": [],
       "timeout_override_s": null
