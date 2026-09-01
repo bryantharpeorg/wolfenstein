@@ -62,35 +62,50 @@ function materialsAdjacentToDoors(): Set<MaterialName> {
 }
 
 /** Picks a material name not used by any wall type adjacent to a door, so a
- * door reads as distinct from the walls beside it (US3-S3). Falls back to a
- * hard-coded value only if every material is somehow in use. */
+ * door reads as distinct from the walls beside it (US3-S3). Metal reads as a
+ * door first, so the preference order is tried before the rest of the table;
+ * the shipped grid puts types 2..5 beside doors, which forces `stone`. */
+const DOOR_MATERIAL_PREFERENCE: readonly MaterialName[] = ['steel', 'wood', 'stone'];
+
 function pickDistinctSurfaceMaterial(): MaterialName {
   const used = materialsAdjacentToDoors();
-  for (const name of MATERIAL_NAMES) {
+  for (const name of [...DOOR_MATERIAL_PREFERENCE, ...MATERIAL_NAMES]) {
     if (!used.has(name)) return name;
   }
   return 'blood-stone';
 }
 
-/** Named binding for surfaces that are not wall type IDs. */
-const SURFACE_MATERIALS: Record<'door' | 'secret' | 'floor' | 'ceiling', MaterialName> = {
+/** Named binding for surfaces that are not wall type IDs. The floor deliberately
+ * avoids `stone`: all five wall types are in use in the shipped grid, so floor
+ * and ceiling cannot avoid every wall material, but they can avoid the dominant
+ * one (type '1', 252 tiles) and each other (US3-S4). */
+const SURFACE_MATERIALS: Record<'door' | 'floor' | 'ceiling', MaterialName> = {
   door: pickDistinctSurfaceMaterial(),
-  secret: 'stone',
-  floor: 'stone',
+  floor: 'wood',
   ceiling: 'blood-stone',
 };
 
+/** 002's declared default material, for a surface with no wall type of its own
+ * — the doorway and secret recesses, and any unmapped ID (FR-008). */
+export function resolveDefaultWallMaterial(): MaterialName {
+  return defaultMaterialName();
+}
+
 /** Resolves a wall type ID ('1'..'9') to one material name. Unmapped IDs fall
- * back to the declared default and record a fallback (FR-008, US3-S1). */
+ * back to the declared default and record a fallback (FR-008, US3-S1).
+ *
+ * The recorded `name` is the material substituted *in*, which is a real member
+ * of the table; the ID that had no mapping is named in `reason`. Recording the
+ * unmapped ID as the name would put a non-material into the diagnostics list. */
 export function resolveWallMaterial(wallTypeId: string): MaterialName {
   const mapped = WALL_TYPE_TO_MATERIAL[wallTypeId];
   if (mapped != null) return mapped;
 
   const fallback = defaultMaterialName();
   recordFallback({
-    name: wallTypeId as MaterialName,
-    map: 'normal',
-    reason: `wall type ${wallTypeId} has no material mapping; falling back to default`,
+    name: fallback,
+    map: 'binding',
+    reason: `wall type ${wallTypeId} has no material mapping; falling back to ${fallback}`,
   });
   return fallback;
 }
@@ -100,9 +115,27 @@ export function resolveDoorMaterial(): MaterialName {
   return SURFACE_MATERIALS.door;
 }
 
-/** Material for every secret block (US3-S3). */
-export function resolveSecretMaterial(): MaterialName {
-  return SURFACE_MATERIALS.secret;
+/**
+ * Material for a secret block, which is the material of the wall it is embedded
+ * in. 004 builds the block in its neighbour's colour on purpose — "an unpushed
+ * secret is indistinguishable from it ... found by pushing, not by looking" —
+ * and skinning it to stand out would regress that milestone's own acceptance
+ * criterion. It still carries a declared material from the table (FR-008); see
+ * DECISIONS.md for the fork.
+ */
+export function resolveSecretMaterial(tileX: number, tileZ: number): MaterialName {
+  for (const [nx, nz] of [
+    [tileX, tileZ - 1],
+    [tileX, tileZ + 1],
+    [tileX - 1, tileZ],
+    [tileX + 1, tileZ],
+  ]) {
+    const cell = LEVEL_GRID[nz as number]?.[nx as number];
+    if (cell != null && WALL_TYPE_TO_MATERIAL[cell] != null) {
+      return WALL_TYPE_TO_MATERIAL[cell] as MaterialName;
+    }
+  }
+  return defaultMaterialName();
 }
 
 /** Material for the merged floor geometry (US3-S4). */

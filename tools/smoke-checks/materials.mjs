@@ -5,28 +5,29 @@
 
 export const name = 'materials';
 
-const CAMERA_POSITIONS = [
-  { x: 10.5, z: 10.5, yaw: 0 },
-  { x: 30.5, z: 10.5, yaw: Math.PI / 2 },
-  { x: 30.5, z: 30.5, yaw: Math.PI },
-  { x: 55.5, z: 55.5, yaw: -Math.PI / 2 },
+// Four scripted walks from the spawn tile, each a sustained push in one
+// direction. US3-S5 asks for the draw-call ceiling "at any camera position", so
+// the view has to actually move: `__playerDrive` is 003's input seam and the
+// camera follows the player through it, whereas writing to `__diag.player` only
+// edits the report.
+const WALKS = [
+  { label: 'spawn', vx: 0, vz: 0 },
+  { label: 'north', vx: 0, vz: -5.4 },
+  { label: 'east', vx: 5.4, vz: 0 },
+  { label: 'south', vx: 0, vz: 5.4 },
 ];
 
-async function moveCamera(page, { x, z, yaw }) {
+const DRIVE_STEPS = 40;
+const STEP_MS = 100;
+
+/** Drives the player, then lets a few frames render so drawCalls settles. */
+async function walk(page, { vx, vz }) {
   await page.evaluate(
-    ({ px, pz, pyaw }) => {
-      window.__diag.player.x = px;
-      window.__diag.player.z = pz;
-      window.__diag.player.yaw = pyaw;
-      const camera = window.__smokeCamera;
-      if (camera != null) {
-        camera.position.set(px, 1.5, pz);
-        camera.lookAt(px - Math.sin(pyaw), 1.5, pz - Math.cos(pyaw));
-      }
+    ({ dx, dz, steps, ms }) => {
+      for (let i = 0; i < steps; i += 1) window.__playerDrive(dx, dz, ms);
     },
-    { px: x, pz: z, pyaw: yaw },
+    { dx: vx, dz: vz, steps: DRIVE_STEPS, ms: STEP_MS },
   );
-  // Let a few frames render at the new camera position so drawCalls settles.
   await page.evaluate(
     () =>
       new Promise((resolve) => {
@@ -39,6 +40,7 @@ async function moveCamera(page, { x, z, yaw }) {
         requestAnimationFrame(tick);
       }),
   );
+  return page.evaluate(() => ({ x: window.__diag.player.x, z: window.__diag.player.z }));
 }
 
 async function readMaterials(page) {
@@ -67,12 +69,6 @@ export default async function check({ page }) {
     timeout: 15000,
   });
 
-  // Expose the camera for scripted moves.
-  await page.evaluate(() => {
-    // @ts-ignore
-    window.__smokeCamera = window.__diag.__camera ?? null;
-  });
-
   const first = await readMaterials(page);
   if (first.materials == null) {
     failures.push('window.__diag.materials is missing');
@@ -85,14 +81,34 @@ export default async function check({ page }) {
     );
   }
 
-  for (const position of CAMERA_POSITIONS) {
-    await moveCamera(page, position);
+  await page.waitForFunction(() => typeof window.__playerDrive === 'function', {
+    timeout: 15000,
+  });
+
+  // The walks must genuinely move the player, or this loop samples one position
+  // four times and US3-S5 goes unasserted.
+  const visited = [];
+  for (const step of WALKS) {
+    const at = await walk(page, step);
+    visited.push(`${step.label} (${at.x.toFixed(2)}, ${at.z.toFixed(2)})`);
     const reading = await readMaterials(page);
     if (reading.drawCalls >= 20) {
       failures.push(
-        `drawCalls ${reading.drawCalls} is not under 20 at (${position.x}, ${position.z})`,
+        `drawCalls ${reading.drawCalls} is not under 20 after walking ${step.label} to (${at.x.toFixed(2)}, ${at.z.toFixed(2)})`,
       );
     }
+    if (reading.materials != null && reading.materials.untexturedMeshes !== 0) {
+      failures.push(
+        `untexturedMeshes is ${reading.materials.untexturedMeshes} after walking ${step.label}, expected 0`,
+      );
+    }
+  }
+
+  const distinct = new Set(visited.map((entry) => entry.slice(entry.indexOf('('))));
+  if (distinct.size < 2) {
+    failures.push(
+      `the scripted walks never moved the player: sampled ${[...distinct].join(', ')}`,
+    );
   }
 
   if (first.materials.textureCount !== 15) {

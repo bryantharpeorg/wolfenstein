@@ -13,6 +13,7 @@ import {
   SRGBColorSpace,
   LinearSRGBColorSpace,
 } from 'three';
+import type { Material } from 'three';
 import type { MaterialMapSet } from './maps';
 import { MATERIAL_NAMES, type MaterialName } from './table';
 
@@ -77,6 +78,10 @@ export function adaptMaterial(maps: MaterialMapSet): AdaptedMaterial {
     metalness: 0,
   });
 
+  // Names the material after its table entry, so a mesh's binding is legible in
+  // a scene walk and in the devtools inspector rather than anonymous.
+  material.name = maps.name;
+
   const adapted: AdaptedMaterial = { name: maps.name, material, albedo, normal, roughness };
   materialCache.set(maps.name, adapted);
   return adapted;
@@ -92,7 +97,8 @@ export function resetMaterialCache(): void {
   materialCache.clear();
 }
 
-/** Whether a material has a usable albedo map. */
-export function hasAlbedoMap(material: MeshStandardMaterial): boolean {
-  return material.map != null;
+/** Whether a material has a usable albedo map. Takes the base `Material` so a
+ * scene walk can ask it of anything it finds, not just the ones we built. */
+export function hasAlbedoMap(material: Material): boolean {
+  return (material as { map?: unknown }).map != null;
 }
