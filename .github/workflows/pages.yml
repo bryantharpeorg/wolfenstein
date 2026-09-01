@@ -1,0 +1,48 @@
+# Publishes the built game to GitHub Pages on every landing on main.
+# Deliberately NOT part of the ergane gates: ergane-gates.yml's job names are
+# the merge-queue's required checks and must not change. This workflow runs
+# only after the queue has already landed a commit, so it can never block it.
+#
+# The Pages base path (/wolfenstein/) is injected here via --base and must
+# never move into vite.config.ts: tools/smoke.mjs serves dist/ at the root,
+# so a baked-in base would 404 the bundle and fail the required `test` gate.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci || npm install
+      - id: pages
+        uses: actions/configure-pages@v5
+      # Full script (tsc && vite build): tsc emits into dist/, vite wipes and
+      # rebuilds it -- upload only after both. npm forwards the flag to the
+      # final command in the script, i.e. vite build.
+      - run: npm run build -- --base="${{ steps.pages.outputs.base_path }}/"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
