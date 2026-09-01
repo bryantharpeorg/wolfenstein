@@ -17,8 +17,19 @@ import type { Material } from 'three';
 import type { MaterialMapSet } from './maps';
 import { MATERIAL_NAMES, type MaterialName } from './table';
 
-/** Mipmaps on, with a declared anisotropy level for grazing angles (US3-S10). */
-export const MATERIAL_ANISOTROPY = 8;
+/** The declared anisotropy level (US3-S10, FR-011).
+ *
+ * 1, deliberately, since 2026-09-01. The adapter keeps DataTexture's default
+ * NearestFilter, and WebGPU rejects any sampler that combines maxAnisotropy > 1
+ * with a non-linear filter: Dawn invalidates the sampler, every bind group that
+ * references it, and with them the whole render pass -- silently, every frame.
+ * That was the entire cause of the WebGPU black screen. With nearest filtering
+ * the old value of 8 was visually inert anyway (anisotropy refines mip
+ * sampling, and a nearest min filter never reads the mipmaps), so 1 changes
+ * nothing on WebGL and unbreaks WebGPU. Raising it again requires switching the
+ * filters to linear first -- which was tried, and sank the software-rendered CI
+ * smoke pass from ~14 fps to 3.9 against a floor of 5. */
+export const MATERIAL_ANISOTROPY = 1;
 
 /** Three.js material + its backing textures, so a resize or re-bind can reason
  * about what is already uploaded. */
