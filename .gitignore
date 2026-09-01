@@ -40,3 +40,9 @@ playwright-report/
 # audits. Untracked and unignored, it appears as `git status` noise and is one
 # `git add -A` from being committed. See feedback #48.
 .ergane-detector/
+
+# Ergane's verification store: a live SQLite database (verification.db plus its
+# -wal and -shm sidecars) that the worker writes while gates run. Untracked and
+# unignored it is one `git add -A` from being committed mid-write, which commits
+# a torn database. Same hazard as .ergane-detector/ above.
+.factory/
