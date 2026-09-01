@@ -87,6 +87,7 @@ async function readMaterials(page) {
             bytes: d.materials.bytes,
             generatedMs: d.materials.generatedMs,
             pendingMaterials: d.materials.pendingMaterials,
+            derivedOffThread: d.materials.derivedOffThread,
             fallbacks: d.materials.fallbacks,
           }
         : null,
@@ -294,7 +295,8 @@ export default async function check({ page, root }) {
   console.log(
     `  materials: ${probe == null ? '?' : probe.materialInstances} materials over ${probe == null ? '?' : probe.meshes} meshes, ` +
       `${probe == null ? '?' : probe.textureInstances} textures, anisotropy ${probe == null ? '?' : probe.anisotropy.join('/')}, ` +
-      `generatedMs ${Number(generatedBefore).toFixed(1)}, fps ${Number(settledAgain.fps).toFixed(1)} with ${settledAgain.enemiesAlive} guards live`,
+      `generatedMs ${Number(generatedBefore).toFixed(1)} ${settled.materials.derivedOffThread ? 'off-thread' : 'on the frame loop, stepped'}, ` +
+      `fps ${Number(settledAgain.fps).toFixed(1)} with ${settledAgain.enemiesAlive} guards live`,
   );
 
   return failures;

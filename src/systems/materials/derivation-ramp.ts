@@ -49,6 +49,11 @@ declare module '../../materials/diagnostics' {
     /** Materials still awaiting their full-resolution maps; 0 once the ramp is
      * spent. A resize is only meaningfully asserted against a settled page. */
     pendingMaterials?: number;
+    /** Whether the full derivation ran on a worker rather than on the frames
+     * the page owes the render loop. False is a legitimate outcome — an
+     * environment with no `Worker` takes the stepped fallback — but it is the
+     * difference between the two costs, so it is reported rather than assumed. */
+    derivedOffThread?: boolean;
   }
 }
 

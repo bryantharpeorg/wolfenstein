@@ -270,6 +270,9 @@ function countUntexturedMeshes(surfaces: readonly SurfaceMesh[]): number {
   return untextured;
 }
 
+/** True while the worker owns the derivation, so `update()` does none of it. */
+let derivingOffThread = false;
+
 /** The whole cost side of `__diag.materials`, republished after every step of
  * the ramp so the page reports what it is actually holding right now. */
 function publishCost(untexturedMeshes: number): void {
@@ -280,13 +283,11 @@ function publishCost(untexturedMeshes: number): void {
     generatedMs: rampGeneratedMs(),
     materials: rampReports(),
     pendingMaterials: rampPending(),
+    derivedOffThread: derivingOffThread,
   });
 }
 
 let untextured = 0;
-
-/** True while the worker owns the derivation, so `update()` does none of it. */
-let derivingOffThread = false;
 
 /** Installs a finished material on the shared MeshStandardMaterial. Every mesh
  * already bound to it upgrades at once — the scene holds the material, never
