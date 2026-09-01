@@ -40,7 +40,7 @@ async function makeRenderer(): Promise<{
   usedBackend: 'webgpu' | 'webgl';
   fallbackReason: string | null;
 }> {
-  const backend = selectBackend(navigator);
+  const backend = selectBackend(navigator, window.location.search);
 
   const container = document.getElementById('canvas-container');
   if (container == null) {
@@ -55,7 +55,7 @@ async function makeRenderer(): Promise<{
 }
 
 async function run() {
-  const selected = selectBackend(navigator);
+  const selected = selectBackend(navigator, window.location.search);
   const diag = createDiagnostics(selected);
   installErrorHandlers(diag);
   window.__diag = diag;
