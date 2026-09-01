@@ -6,6 +6,8 @@
 
 import {
   DataTexture,
+  LinearFilter,
+  LinearMipmapLinearFilter,
   MeshStandardMaterial,
   RepeatWrapping,
   RGBAFormat,
@@ -50,6 +52,15 @@ function makeDataTexture(
   texture.wrapT = RepeatWrapping;
   texture.mipmaps = [];
   texture.generateMipmaps = true;
+  // DataTexture defaults to NearestFilter, which silently defeated both halves of
+  // FR-011: a nearest min filter never reads the mipmaps, and WebGPU rejects any
+  // sampler that combines maxAnisotropy > 1 with a non-linear filter -- Dawn
+  // invalidates the sampler, every bind group that references it, and with them
+  // the whole render pass, which is why the WebGPU backend drew a black screen
+  // (2026-09-01). Trilinear filtering makes the declared mipmaps and anisotropy
+  // real on WebGL and legal on WebGPU.
+  texture.minFilter = LinearMipmapLinearFilter;
+  texture.magFilter = LinearFilter;
   texture.anisotropy = MATERIAL_ANISOTROPY;
   texture.needsUpdate = true;
   return texture;
