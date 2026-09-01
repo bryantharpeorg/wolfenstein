@@ -1,9 +1,38 @@
-// US3 runtime assertion: the level is fully textured and 002's draw-call budget
-// survived being skinned. Tests __diag.materials.untexturedMeshes, drawCalls at
-// multiple camera positions, one map set per material, and no regeneration on
-// viewport resize (FR-008, FR-010, FR-011, US3-S2, US3-S5, US3-S8, US3-S9).
+// The materials runtime assertions. US3's half: the level is fully textured and
+// 002's draw-call budget survived being skinned. US4's half: exactly one set of
+// maps exists per material and is shared by every mesh, mipmaps and the declared
+// anisotropy are in effect, a viewport resize regenerates nothing, and the
+// textured level holds its frame rate with the enemy system live (FR-008,
+// FR-009, FR-010, FR-011, US3-S2, US3-S5, US4-S3, US4-S4, US4-S5, US4-S6).
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { SMOKE_FPS_FLOOR } from '../smoke-floor.mjs';
 
 export const name = 'materials';
+
+/** The five materials 005 declares. */
+const MATERIAL_COUNT = 5;
+/** Albedo, normal, roughness. */
+const MAPS_PER_MATERIAL = 3;
+
+/** three.js minification filters that sample a mipmap chain. A texture left on
+ * NearestFilter (1003) or LinearFilter (1006) never touches a mipmap and
+ * ignores anisotropy outright, which is US4-S5's failure exactly. */
+const MIPMAP_MIN_FILTERS = new Map([
+  [1004, 'NearestMipmapNearest'],
+  [1005, 'NearestMipmapLinear'],
+  [1007, 'LinearMipmapNearest'],
+  [1008, 'LinearMipmapLinear'],
+]);
+
+/** The anisotropy level the source declares, read back from the source rather
+ * than duplicated here, so this asserts the page agrees with the constant. */
+function readDeclaredAnisotropy(root) {
+  const source = readFileSync(resolve(root, 'src/materials/texture-adapter.ts'), 'utf8');
+  const match = source.match(/MATERIAL_ANISOTROPY\s*=\s*(\d+)/);
+  return match == null ? null : Number(match[1]);
+}
 
 // Four scripted walks from the spawn tile, each a sustained push in one
 // direction. US3-S5 asks for the draw-call ceiling "at any camera position", so
@@ -49,12 +78,15 @@ async function readMaterials(page) {
     return {
       ready: d.ready,
       drawCalls: d.drawCalls,
+      fps: d.fps,
+      enemiesAlive: d.enemiesAlive,
       materials: d.materials
         ? {
             untexturedMeshes: d.materials.untexturedMeshes,
             textureCount: d.materials.textureCount,
             bytes: d.materials.bytes,
             generatedMs: d.materials.generatedMs,
+            pendingMaterials: d.materials.pendingMaterials,
             fallbacks: d.materials.fallbacks,
           }
         : null,
@@ -62,7 +94,17 @@ async function readMaterials(page) {
   });
 }
 
-export default async function check({ page }) {
+/** Waits for the derivation ramp to spend itself. Every cost assertion below is
+ * about a settled page: sampling `generatedMs` while the sharp maps are still
+ * arriving would compare two points on a rising curve and blame the resize. */
+async function settle(page) {
+  await page.waitForFunction(
+    () => window.__diag?.materials?.pendingMaterials === 0,
+    { timeout: 20000 },
+  );
+}
+
+export default async function check({ page, root }) {
   const failures = [];
 
   await page.waitForFunction(() => window.__diag != null && window.__diag.ready === true, {
@@ -111,9 +153,10 @@ export default async function check({ page }) {
     );
   }
 
-  if (first.materials.textureCount !== 15) {
+  const expectedTextures = MATERIAL_COUNT * MAPS_PER_MATERIAL;
+  if (first.materials.textureCount !== expectedTextures) {
     failures.push(
-      `textureCount is ${first.materials.textureCount}, expected 15 (5 materials * 3 maps)`,
+      `textureCount is ${first.materials.textureCount}, expected ${expectedTextures} (${MATERIAL_COUNT} materials * ${MAPS_PER_MATERIAL} maps)`,
     );
   }
 
@@ -125,9 +168,72 @@ export default async function check({ page }) {
     failures.push(`materials.generatedMs is ${first.materials.generatedMs}, expected positive`);
   }
 
-  // FR-011 / US3-S9: a viewport resize must not regenerate textures or change
+  // Everything below is about the settled page: the derivation ramp has spent
+  // itself and nothing further is being generated.
+  await settle(page);
+  const settled = await readMaterials(page);
+
+  // US4-S3: one set of maps per material, shared by every mesh. `textureCount`
+  // alone cannot say this — it is a number this code wrote, and it reads 15
+  // whether fifteen textures are shared by ninety meshes or duplicated per
+  // mesh. The probe counts the distinct objects actually hanging off the scene.
+  const probe = await page.evaluate(() =>
+    typeof window.__materialsProbe === 'function' ? window.__materialsProbe() : null,
+  );
+  if (probe == null) {
+    failures.push('window.__materialsProbe is missing: one-set-per-material cannot be read');
+  } else {
+    if (probe.meshes <= MATERIAL_COUNT) {
+      failures.push(
+        `the probe found only ${probe.meshes} skinned level meshes; sharing is unprovable below one mesh per material`,
+      );
+    }
+    if (probe.names.length !== MATERIAL_COUNT) {
+      failures.push(
+        `${probe.names.length} material names are bound in the scene (${probe.names.join(', ')}), expected ${MATERIAL_COUNT}`,
+      );
+    }
+    if (probe.materialInstances !== MATERIAL_COUNT) {
+      failures.push(
+        `${probe.materialInstances} distinct materials are bound across ${probe.meshes} meshes, expected ${MATERIAL_COUNT} — one per material, shared`,
+      );
+    }
+    if (probe.textureInstances !== expectedTextures) {
+      failures.push(
+        `${probe.textureInstances} distinct textures are uploaded across ${probe.meshes} meshes, expected ${expectedTextures} — one set per material, not one set per mesh`,
+      );
+    }
+    if (probe.withoutAlbedo !== 0) {
+      failures.push(`${probe.withoutAlbedo} skinned meshes carry no albedo map`);
+    }
+
+    // US4-S5: mipmaps and a declared anisotropy level actually in effect.
+    if (probe.mipmapped !== true) {
+      failures.push('not every uploaded map requests a mipmap chain');
+    }
+    const declaredAnisotropy = readDeclaredAnisotropy(root);
+    if (declaredAnisotropy == null) {
+      failures.push('could not read MATERIAL_ANISOTROPY from src/materials/texture-adapter.ts');
+    } else if (
+      probe.anisotropy.length !== 1 ||
+      probe.anisotropy[0] !== declaredAnisotropy
+    ) {
+      failures.push(
+        `anisotropy across uploaded maps is [${probe.anisotropy.join(', ')}], expected every map at the declared ${declaredAnisotropy}`,
+      );
+    }
+    const nonMipmapFilters = probe.minFilters.filter((f) => !MIPMAP_MIN_FILTERS.has(f));
+    if (nonMipmapFilters.length > 0) {
+      failures.push(
+        `minification filter ${nonMipmapFilters.join(', ')} never samples a mipmap, so the chain and the anisotropy are both dead weight`,
+      );
+    }
+  }
+
+  // FR-011 / US4-S4: a viewport resize must not regenerate textures or change
   // the reported generation time.
-  const generatedBefore = first.materials.generatedMs;
+  const generatedBefore = settled.materials.generatedMs;
+  const texturesBefore = probe == null ? null : probe.textureInstances;
   const viewport = page.viewportSize();
   if (viewport != null) {
     await page.setViewportSize({ width: viewport.width + 200, height: viewport.height + 100 });
@@ -149,8 +255,47 @@ export default async function check({ page }) {
         `generatedMs changed after resize: ${generatedBefore} -> ${afterResize.materials.generatedMs}`,
       );
     }
+    if (afterResize.materials != null && afterResize.materials.textureCount !== expectedTextures) {
+      failures.push(
+        `textureCount changed after resize: ${expectedTextures} -> ${afterResize.materials.textureCount}`,
+      );
+    }
+    const probeAfter = await page.evaluate(() =>
+      typeof window.__materialsProbe === 'function' ? window.__materialsProbe() : null,
+    );
+    if (probeAfter != null && texturesBefore != null && probeAfter.textureInstances !== texturesBefore) {
+      failures.push(
+        `distinct uploaded textures changed after resize: ${texturesBefore} -> ${probeAfter.textureInstances}`,
+      );
+    }
     await page.setViewportSize(viewport);
   }
+
+  // US4-S6 / FR-016: the textured level holds its frame rate with the enemy
+  // system live. The floor is 001's and is not lowered here; what moved to make
+  // this pass is where the derivation is spent, not the bar.
+  const settledAgain = await readMaterials(page);
+  if (!(settledAgain.enemiesAlive > 0)) {
+    failures.push(
+      `the enemy system is not live: enemiesAlive is ${settledAgain.enemiesAlive}, so the frame budget was measured without it`,
+    );
+  }
+  if (!(settledAgain.fps > SMOKE_FPS_FLOOR)) {
+    failures.push(
+      `fps ${Number(settledAgain.fps).toFixed(1)} did not clear the declared floor ${SMOKE_FPS_FLOOR} with ${settledAgain.enemiesAlive} guards live and every surface textured`,
+    );
+  }
+  if (settledAgain.materials != null && settledAgain.materials.untexturedMeshes !== 0) {
+    failures.push(
+      `untexturedMeshes is ${settledAgain.materials.untexturedMeshes} on the settled page, expected 0`,
+    );
+  }
+
+  console.log(
+    `  materials: ${probe == null ? '?' : probe.materialInstances} materials over ${probe == null ? '?' : probe.meshes} meshes, ` +
+      `${probe == null ? '?' : probe.textureInstances} textures, anisotropy ${probe == null ? '?' : probe.anisotropy.join('/')}, ` +
+      `generatedMs ${Number(generatedBefore).toFixed(1)}, fps ${Number(settledAgain.fps).toFixed(1)} with ${settledAgain.enemiesAlive} guards live`,
+  );
 
   return failures;
 }
