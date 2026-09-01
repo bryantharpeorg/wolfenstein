@@ -99,11 +99,11 @@ export function adaptMaterial(maps: MaterialMapSet): AdaptedMaterial {
 }
 
 /**
- * Replaces the three maps hanging off an already-adapted material with a newly
- * derived set, in place. The scene graph holds the *material*, never the
- * texture, so the sharper set reaches every mesh at once without a re-bind; the
- * superseded textures are disposed, so exactly one set per material stays
- * resident rather than two (FR-011, US4-S3, US4-S6).
+ * Replaces the three maps hanging off an already-adapted material in place. The
+ * scene graph holds the *material*, never the texture, so the sharper set
+ * reaches every mesh at once without a re-bind; the superseded textures are
+ * disposed, so one set per material stays resident rather than two (FR-011,
+ * US4-S3, US4-S6).
  */
 export function upgradeMaterialMaps(maps: MaterialMapSet): AdaptedMaterial {
   const cached = materialCache.get(maps.name);

@@ -11,20 +11,14 @@ import { SMOKE_FPS_FLOOR } from '../smoke-floor.mjs';
 
 export const name = 'materials';
 
-/** The five materials 005 declares. */
+/** The five materials 005 declares, times albedo, normal, roughness. */
 const MATERIAL_COUNT = 5;
-/** Albedo, normal, roughness. */
 const MAPS_PER_MATERIAL = 3;
 
 /** three.js minification filters that sample a mipmap chain. A texture left on
  * NearestFilter (1003) or LinearFilter (1006) never touches a mipmap and
  * ignores anisotropy outright, which is US4-S5's failure exactly. */
-const MIPMAP_MIN_FILTERS = new Map([
-  [1004, 'NearestMipmapNearest'],
-  [1005, 'NearestMipmapLinear'],
-  [1007, 'LinearMipmapNearest'],
-  [1008, 'LinearMipmapLinear'],
-]);
+const MIPMAP_MIN_FILTERS = new Set([1004, 1005, 1007, 1008]);
 
 /** The anisotropy level the source declares, read back from the source rather
  * than duplicated here, so this asserts the page agrees with the constant. */
@@ -86,8 +80,6 @@ async function readMaterials(page) {
             textureCount: d.materials.textureCount,
             bytes: d.materials.bytes,
             generatedMs: d.materials.generatedMs,
-            pendingMaterials: d.materials.pendingMaterials,
-            derivedOffThread: d.materials.derivedOffThread,
             fallbacks: d.materials.fallbacks,
           }
         : null,
@@ -95,13 +87,11 @@ async function readMaterials(page) {
   });
 }
 
-/** Waits for the derivation ramp to spend itself. Every cost assertion below is
- * about a settled page: sampling `generatedMs` while the sharp maps are still
- * arriving would compare two points on a rising curve and blame the resize. */
-async function settle(page) {
-  await page.waitForFunction(
-    () => window.__diag?.materials?.pendingMaterials === 0,
-    { timeout: 20000 },
+/** US4-S3 and US4-S5 are claims about live GPU objects, so they are read off the
+ * scene rather than off a count the page wrote about itself. */
+function readProbe(page) {
+  return page.evaluate(() =>
+    typeof window.__materialsProbe === 'function' ? window.__materialsProbe() : null,
   );
 }
 
@@ -169,40 +159,32 @@ export default async function check({ page, root }) {
     failures.push(`materials.generatedMs is ${first.materials.generatedMs}, expected positive`);
   }
 
-  // Everything below is about the settled page: the derivation ramp has spent
-  // itself and nothing further is being generated.
-  await settle(page);
+  // Everything below is about a settled page: sampling `generatedMs` while the
+  // sharp maps are still arriving compares two points on a rising curve and
+  // blames the resize for the difference.
+  await page.waitForFunction(() => window.__diag?.materials?.pendingMaterials === 0, {
+    timeout: 20000,
+  });
   const settled = await readMaterials(page);
 
   // US4-S3: one set of maps per material, shared by every mesh. `textureCount`
   // alone cannot say this — it is a number this code wrote, and it reads 15
-  // whether fifteen textures are shared by ninety meshes or duplicated per
-  // mesh. The probe counts the distinct objects actually hanging off the scene.
-  const probe = await page.evaluate(() =>
-    typeof window.__materialsProbe === 'function' ? window.__materialsProbe() : null,
-  );
+  // whether fifteen textures are shared by ninety meshes or duplicated per mesh.
+  const probe = await readProbe(page);
   if (probe == null) {
     failures.push('window.__materialsProbe is missing: one-set-per-material cannot be read');
   } else {
     if (probe.meshes <= MATERIAL_COUNT) {
-      failures.push(
-        `the probe found only ${probe.meshes} skinned level meshes; sharing is unprovable below one mesh per material`,
-      );
+      failures.push(`only ${probe.meshes} skinned meshes; sharing is unprovable below one per material`);
     }
     if (probe.names.length !== MATERIAL_COUNT) {
-      failures.push(
-        `${probe.names.length} material names are bound in the scene (${probe.names.join(', ')}), expected ${MATERIAL_COUNT}`,
-      );
+      failures.push(`${probe.names.length} material names bound (${probe.names.join(', ')}), expected ${MATERIAL_COUNT}`);
     }
     if (probe.materialInstances !== MATERIAL_COUNT) {
-      failures.push(
-        `${probe.materialInstances} distinct materials are bound across ${probe.meshes} meshes, expected ${MATERIAL_COUNT} — one per material, shared`,
-      );
+      failures.push(`${probe.materialInstances} distinct materials across ${probe.meshes} meshes, expected ${MATERIAL_COUNT} — one per material, shared`);
     }
     if (probe.textureInstances !== expectedTextures) {
-      failures.push(
-        `${probe.textureInstances} distinct textures are uploaded across ${probe.meshes} meshes, expected ${expectedTextures} — one set per material, not one set per mesh`,
-      );
+      failures.push(`${probe.textureInstances} distinct textures across ${probe.meshes} meshes, expected ${expectedTextures} — one set per material, not one set per mesh`);
     }
     if (probe.withoutAlbedo !== 0) {
       failures.push(`${probe.withoutAlbedo} skinned meshes carry no albedo map`);
@@ -212,29 +194,21 @@ export default async function check({ page, root }) {
     if (probe.mipmapped !== true) {
       failures.push('not every uploaded map requests a mipmap chain');
     }
-    const declaredAnisotropy = readDeclaredAnisotropy(root);
-    if (declaredAnisotropy == null) {
+    const anisotropy = readDeclaredAnisotropy(root);
+    if (anisotropy == null) {
       failures.push('could not read MATERIAL_ANISOTROPY from src/materials/texture-adapter.ts');
-    } else if (
-      probe.anisotropy.length !== 1 ||
-      probe.anisotropy[0] !== declaredAnisotropy
-    ) {
-      failures.push(
-        `anisotropy across uploaded maps is [${probe.anisotropy.join(', ')}], expected every map at the declared ${declaredAnisotropy}`,
-      );
+    } else if (probe.anisotropy.length !== 1 || probe.anisotropy[0] !== anisotropy) {
+      failures.push(`anisotropy across uploaded maps is [${probe.anisotropy.join(', ')}], expected every map at the declared ${anisotropy}`);
     }
-    const nonMipmapFilters = probe.minFilters.filter((f) => !MIPMAP_MIN_FILTERS.has(f));
-    if (nonMipmapFilters.length > 0) {
-      failures.push(
-        `minification filter ${nonMipmapFilters.join(', ')} never samples a mipmap, so the chain and the anisotropy are both dead weight`,
-      );
+    const flat = probe.minFilters.filter((f) => !MIPMAP_MIN_FILTERS.has(f));
+    if (flat.length > 0) {
+      failures.push(`minification filter ${flat.join(', ')} never samples a mipmap, so the chain and the anisotropy are both dead weight`);
     }
   }
 
   // FR-011 / US4-S4: a viewport resize must not regenerate textures or change
   // the reported generation time.
   const generatedBefore = settled.materials.generatedMs;
-  const texturesBefore = probe == null ? null : probe.textureInstances;
   const viewport = page.viewportSize();
   if (viewport != null) {
     await page.setViewportSize({ width: viewport.width + 200, height: viewport.height + 100 });
@@ -257,17 +231,11 @@ export default async function check({ page, root }) {
       );
     }
     if (afterResize.materials != null && afterResize.materials.textureCount !== expectedTextures) {
-      failures.push(
-        `textureCount changed after resize: ${expectedTextures} -> ${afterResize.materials.textureCount}`,
-      );
+      failures.push(`textureCount changed after resize: ${expectedTextures} -> ${afterResize.materials.textureCount}`);
     }
-    const probeAfter = await page.evaluate(() =>
-      typeof window.__materialsProbe === 'function' ? window.__materialsProbe() : null,
-    );
-    if (probeAfter != null && texturesBefore != null && probeAfter.textureInstances !== texturesBefore) {
-      failures.push(
-        `distinct uploaded textures changed after resize: ${texturesBefore} -> ${probeAfter.textureInstances}`,
-      );
+    const after = await readProbe(page);
+    if (probe != null && after != null && after.textureInstances !== probe.textureInstances) {
+      failures.push(`distinct uploaded textures changed after resize: ${probe.textureInstances} -> ${after.textureInstances}`);
     }
     await page.setViewportSize(viewport);
   }
@@ -275,28 +243,22 @@ export default async function check({ page, root }) {
   // US4-S6 / FR-016: the textured level holds its frame rate with the enemy
   // system live. The floor is 001's and is not lowered here; what moved to make
   // this pass is where the derivation is spent, not the bar.
-  const settledAgain = await readMaterials(page);
-  if (!(settledAgain.enemiesAlive > 0)) {
-    failures.push(
-      `the enemy system is not live: enemiesAlive is ${settledAgain.enemiesAlive}, so the frame budget was measured without it`,
-    );
+  const final = await readMaterials(page);
+  if (!(final.enemiesAlive > 0)) {
+    failures.push(`the enemy system is not live: enemiesAlive is ${final.enemiesAlive}, so the frame budget was measured without it`);
   }
-  if (!(settledAgain.fps > SMOKE_FPS_FLOOR)) {
-    failures.push(
-      `fps ${Number(settledAgain.fps).toFixed(1)} did not clear the declared floor ${SMOKE_FPS_FLOOR} with ${settledAgain.enemiesAlive} guards live and every surface textured`,
-    );
+  if (!(final.fps > SMOKE_FPS_FLOOR)) {
+    failures.push(`fps ${Number(final.fps).toFixed(1)} did not clear the declared floor ${SMOKE_FPS_FLOOR} with ${final.enemiesAlive} guards live and every surface textured`);
   }
-  if (settledAgain.materials != null && settledAgain.materials.untexturedMeshes !== 0) {
-    failures.push(
-      `untexturedMeshes is ${settledAgain.materials.untexturedMeshes} on the settled page, expected 0`,
-    );
+  if (final.materials != null && final.materials.untexturedMeshes !== 0) {
+    failures.push(`untexturedMeshes is ${final.materials.untexturedMeshes} on the settled page, expected 0`);
   }
 
+  const p = probe ?? { materialInstances: '?', meshes: '?', textureInstances: '?', anisotropy: ['?'] };
   console.log(
-    `  materials: ${probe == null ? '?' : probe.materialInstances} materials over ${probe == null ? '?' : probe.meshes} meshes, ` +
-      `${probe == null ? '?' : probe.textureInstances} textures, anisotropy ${probe == null ? '?' : probe.anisotropy.join('/')}, ` +
-      `generatedMs ${Number(generatedBefore).toFixed(1)} ${settled.materials.derivedOffThread ? 'off-thread' : 'on the frame loop, stepped'}, ` +
-      `fps ${Number(settledAgain.fps).toFixed(1)} with ${settledAgain.enemiesAlive} guards live`,
+    `  materials: ${p.materialInstances} materials over ${p.meshes} meshes, ${p.textureInstances} textures, ` +
+      `anisotropy ${p.anisotropy.join('/')}, generatedMs ${Number(generatedBefore).toFixed(1)} stepped, ` +
+      `fps ${Number(final.fps).toFixed(1)} with ${final.enemiesAlive} guards live`,
   );
 
   return failures;

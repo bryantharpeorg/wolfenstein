@@ -1,15 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { MAPS_PER_MATERIAL, textureBytes } from '../../src/materials/maps';
 import { MATERIAL_NAMES } from '../../src/materials/table';
 import { TEXTURE_SIZE } from '../../src/materials/constants';
-import { resetMaterialDiagnostics } from '../../src/materials/diagnostics';
-import { buildMaterialMaps } from '../../src/materials/maps';
 import {
   PREVIEW_TEXTURE_SIZE,
   STAGES_PER_MATERIAL,
-  completeRamp,
   rampBytes,
-  rampGeneratedMs,
   rampMaps,
   rampPending,
   rampReports,
@@ -22,16 +18,12 @@ import {
 // set, then spends the full derivation one stage of one material per frame, so
 // no frame the page owes the render loop ever carries the whole build.
 
-/** Small full size so the ramp's *shape* is asserted without paying for five
+/** Small full size, so the ramp's *shape* is asserted without paying for five
  * 512px derivations in a unit test. */
 const FULL = 32;
 const PREVIEW = 8;
 
 describe('the derivation ramp (US4-S6)', () => {
-  beforeEach(() => {
-    resetMaterialDiagnostics();
-  });
-
   it('skins from a preview set that is ready before the first frame', () => {
     const maps = startRamp(PREVIEW, FULL);
     expect(Object.keys(maps).sort()).toEqual([...MATERIAL_NAMES].sort());
@@ -86,9 +78,7 @@ describe('the derivation ramp (US4-S6)', () => {
 
     const maps = rampMaps();
     expect(maps).not.toBeNull();
-    for (const name of MATERIAL_NAMES) {
-      expect(maps![name].size).toBe(FULL);
-    }
+    for (const name of MATERIAL_NAMES) expect(maps![name].size).toBe(FULL);
     expect(rampBytes()).toBe(textureBytes(FULL, MATERIAL_NAMES.length * MAPS_PER_MATERIAL));
     expect(rampReports()).toHaveLength(MATERIAL_NAMES.length);
     for (const report of rampReports()) {
@@ -104,31 +94,5 @@ describe('the derivation ramp (US4-S6)', () => {
     expect(stepRamp()).toBeNull();
     expect(rampPending()).toBe(0);
     expect(rampBytes()).toBe(bytes);
-  });
-
-  it('accepts a set derived elsewhere and drops that material from the queue', () => {
-    // The worker path derives off the main thread entirely; the ramp is still
-    // the one place that knows which materials are outstanding.
-    startRamp(PREVIEW, FULL);
-    const before = rampPending();
-    const msBefore = rampGeneratedMs();
-
-    completeRamp(buildMaterialMaps('wood', FULL), 42);
-
-    expect(rampPending()).toBe(before - 1);
-    expect(rampMaps()!['wood'].size).toBe(FULL);
-    // Time spent off the main thread is still generation time the page paid for.
-    expect(rampGeneratedMs()).toBeGreaterThanOrEqual(msBefore + 42);
-    // And the stepped fallback never re-derives what already arrived.
-    while (rampPending() > 0) stepRamp();
-    expect(rampMaps()!['wood'].size).toBe(FULL);
-  });
-
-  it('is spent once every material has been completed from elsewhere', () => {
-    startRamp(PREVIEW, FULL);
-    for (const name of MATERIAL_NAMES) completeRamp(buildMaterialMaps(name, FULL), 1);
-    expect(rampPending()).toBe(0);
-    expect(stepRamp()).toBeNull();
-    expect(rampBytes()).toBe(textureBytes(FULL, MATERIAL_NAMES.length * MAPS_PER_MATERIAL));
   });
 });

@@ -2,12 +2,11 @@
  * `window.__materialsProbe()` — the harness's window onto facts that only exist
  * once the scene is built (US4-S3, US4-S5).
  *
- * "Exactly one set of maps per material, shared by every mesh" and "mipmaps and
- * the declared anisotropy are in effect" are both claims about live GPU objects.
- * A count in `__diag` cannot make them: `textureCount: 15` is a number this code
- * wrote, and it stays 15 whether the fifteen textures are shared by ninety
- * meshes or duplicated per mesh. So the probe walks the meshes this system
- * skinned and counts the *distinct* objects it finds hanging off them.
+ * "One set of maps per material, shared by every mesh" and "mipmaps and the
+ * declared anisotropy are in effect" are claims about live GPU objects, and no
+ * count in `__diag` can make them: `textureCount: 15` stays 15 whether the
+ * fifteen textures are shared by ninety meshes or cloned per mesh. So the probe
+ * walks the skinned meshes and counts the *distinct* objects hanging off them.
  */
 import type { Mesh, Texture } from 'three';
 import { MeshStandardMaterial } from 'three';
@@ -18,15 +17,15 @@ export interface MaterialsProbe {
   /** Distinct material names bound across them, sorted. */
   readonly names: readonly string[];
   /** Distinct `MeshStandardMaterial` instances — one per name, or the sharing
-   * that FR-010's draw-call budget depends on is not happening. */
+   * FR-010's draw-call budget depends on is not happening. */
   readonly materialInstances: number;
   /** Distinct texture objects across every bound material's three maps. */
   readonly textureInstances: number;
   /** Meshes whose material carries no albedo map. */
   readonly withoutAlbedo: number;
-  /** Distinct anisotropy levels found, so a clamped texture is visible. */
+  /** Distinct anisotropy levels, so a texture clamped by the driver is visible,
+   * and distinct minification filters as three.js constants. */
   readonly anisotropy: readonly number[];
-  /** Distinct minification filters, as three.js constants. */
   readonly minFilters: readonly number[];
   /** Whether every uploaded map asks for a mipmap chain. */
   readonly mipmapped: boolean;

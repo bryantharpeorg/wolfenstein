@@ -1,13 +1,6 @@
 // World-tile-space UVs (FR-009). Each world-tile edge is one texture repeat, so
 // a merged run of N tiles spans N UV units on its long axis and adjacent faces
 // of the same material agree at their shared edge within the declared epsilon.
-//
-// The projection axis is chosen per vertex from that vertex's own normal, not
-// once for the whole buffer. 002 merges every face of one wall type into a
-// single BufferGeometry, and that buffer holds faces running along X *and*
-// faces running along Z; a single axis chosen from the first quad collapses
-// every face of the other orientation to a constant U — one texel smeared
-// across the whole wall, which is exactly the stretch FR-009 forbids.
 
 import { TILE_SIZE } from '../level';
 
@@ -26,17 +19,17 @@ export type WorldOffset = readonly [x: number, y: number, z: number];
 const NO_OFFSET: WorldOffset = [0, 0, 0];
 
 /**
- * Recomputes the `uv` attribute for every vertex so that one texture repeat
- * spans one world-tile edge (FR-009, US4-S1, US4-S2).
+ * Recomputes the `uv` attribute for every vertex so one texture repeat spans one
+ * world-tile edge (FR-009, US4-S1, US4-S2).
  *
- * `positions` and `normals` are the geometry attributes. `uvs` is written in
- * place when supplied — the merged level buffers already own one — and
- * allocated when it is not. `offset` is added to each position first, so a door
- * leaf built as a box around its own origin lands on the same tile lattice as
- * the wall it sits in.
+ * The projection axis is chosen per vertex from that vertex's own normal, not
+ * once for the whole buffer: 002 merges the X-facing and Z-facing faces of one
+ * wall type into a single geometry, and one axis for the buffer collapses every
+ * face of the other orientation to a constant U — the stretch FR-009 forbids.
  *
- * Pure: nothing outside `uvs` is touched, and the same inputs always give the
- * same output.
+ * `uvs` is written in place when supplied and allocated when it is not.
+ * `offset` is added to each position first, so a door leaf built as a box around
+ * its own origin lands on the tile lattice of the wall it sits in.
  */
 export function computeTileUVs(
   positions: Float32Array,
@@ -61,18 +54,18 @@ export function computeTileUVs(
     const ny = Math.abs(normals[i + 1] ?? 0);
     const nz = Math.abs(normals[i + 2] ?? 0);
 
+    // Normal along Y is floor or ceiling and projects (x, z); a normal along X
+    // spans Z horizontally, one along Z spans X, and both take Y vertically so
+    // a wall's texture is never laid on its side.
     let u: number;
     let w: number;
     if (ny >= nx && ny >= nz) {
-      // Floor and ceiling: the plane is horizontal, so both UV axes are.
       u = x;
       w = z;
     } else if (nx >= nz) {
-      // A face whose normal runs along X spans Z horizontally and Y vertically.
       u = z;
       w = y;
     } else {
-      // A face whose normal runs along Z spans X horizontally and Y vertically.
       u = x;
       w = y;
     }

@@ -25,7 +25,6 @@ import {
 } from '../../materials/texture-adapter';
 import { computeTileUVs } from '../../materials/uv';
 import {
-  completeRamp,
   rampBytes,
   rampGeneratedMs,
   rampMaps,
@@ -34,9 +33,7 @@ import {
   startRamp,
   stepRamp,
 } from './derivation-ramp';
-import { startWorkerDerivation } from './derivation-host';
 import { installMaterialsProbe } from './probe';
-import { TEXTURE_SIZE } from '../../materials/constants';
 import {
   resolveCeilingMaterial,
   resolveDefaultWallMaterial,
@@ -168,14 +165,13 @@ function materialNameFor(surface: Surface): MaterialName {
 
 /**
  * Writes the mesh's UV attribute in world-tile space, then swaps its material
- * for the shared procedural material bound to that surface (T027, FR-009).
+ * for the shared procedural material bound to that surface (FR-009).
  *
- * The UVs go on *before* the material, and they are derived from the mesh's
- * world position rather than its local vertices: 002's merged runs are already
- * in world space and offset by nothing, while 004's door leaves and secret
- * blocks are boxes built around their own origin. Passing the mesh position
- * puts both on the same tile lattice, so a leaf tiles with the wall it sits in
- * instead of carrying a lattice of its own.
+ * The UVs go on *before* the material, and from the mesh's world position
+ * rather than its local vertices: 002's merged runs are already in world space,
+ * while 004's door leaves are boxes built around their own origin. Passing the
+ * mesh position puts both on one tile lattice, so a leaf tiles with the wall it
+ * sits in instead of carrying a lattice of its own.
  */
 function applyMaterialToMesh(mesh: Mesh, materialName: MaterialName): void {
   const maps = rampMaps();
@@ -270,9 +266,6 @@ function countUntexturedMeshes(surfaces: readonly SurfaceMesh[]): number {
   return untextured;
 }
 
-/** True while the worker owns the derivation, so `update()` does none of it. */
-let derivingOffThread = false;
-
 /** The whole cost side of `__diag.materials`, republished after every step of
  * the ramp so the page reports what it is actually holding right now. */
 function publishCost(untexturedMeshes: number): void {
@@ -283,20 +276,10 @@ function publishCost(untexturedMeshes: number): void {
     generatedMs: rampGeneratedMs(),
     materials: rampReports(),
     pendingMaterials: rampPending(),
-    derivedOffThread: derivingOffThread,
   });
 }
 
 let untextured = 0;
-
-/** Installs a finished material on the shared MeshStandardMaterial. Every mesh
- * already bound to it upgrades at once — the scene holds the material, never
- * the texture — so there is no second scene walk and no re-bind (US4-S3). */
-function installMaterial(set: Parameters<typeof completeRamp>[0], ms: number): void {
-  completeRamp(set, ms);
-  upgradeMaterialMaps(set);
-  publishCost(untextured);
-}
 
 defineSystem({
   name: 'materials',
@@ -310,8 +293,7 @@ defineSystem({
 
     // The preview pass, cheap enough to run before the loop starts. Every
     // material is adapted whether or not a mesh asks for it, so the uploaded
-    // count is one set per material rather than one set per material in use,
-    // and so the ramp always has something to upgrade (US4-S3).
+    // count is one set per material rather than per material in use (US4-S3).
     const maps = startRamp();
     for (const name of MATERIAL_NAMES) adaptMaterial(maps[name]);
 
@@ -319,36 +301,22 @@ defineSystem({
     untextured = countUntexturedMeshes(surfaces);
     publishCost(untextured);
     installMaterialsProbe(surfaces.map((entry) => entry.mesh));
-
-    // The full derivation goes to a worker: `src/materials/` imports neither
-    // three.js nor a DOM API, so it runs there unchanged and no frame the page
-    // owes the render loop carries any of it. Where there is no worker, the
-    // stepped ramp in `update()` picks the work up instead (FR-011, US4-S6).
-    derivingOffThread = startWorkerDerivation(MATERIAL_NAMES, TEXTURE_SIZE, {
-      onMaterial: installMaterial,
-      onUnavailable: () => {
-        derivingOffThread = false;
-      },
-    });
   },
   update() {
-    // Nothing to do on the common path: the worker is deriving, or the ramp is
-    // spent. The fallback spends at most one stage of one material per frame,
-    // never a whole material and never the set.
-    if (derivingOffThread || rampPending() === 0) return;
+    // The frame's share of the derivation, and no more: one stage of one
+    // material, never a whole material and never the set. A finished set is
+    // installed on the *shared* material, so every mesh already bound to it
+    // sharpens at once — no second scene walk, no re-bind (US4-S3, US4-S6).
+    if (rampPending() === 0) return;
 
     const finished = stepRamp();
-    if (finished == null) {
-      publishCost(untextured);
-      return;
-    }
-    upgradeMaterialMaps(finished);
+    if (finished != null) upgradeMaterialMaps(finished);
     publishCost(untextured);
   },
   resize() {
     // FR-011 / US4-S4: no texture regeneration, no re-attachment, no re-UV. A
     // viewport change is the camera's business; the material cache and the
-    // generation clock are untouched, which is exactly what the smoke harness
-    // reads back as an unchanged `generatedMs` and an unchanged texture count.
+    // generation clock are untouched, which is what the smoke harness reads
+    // back as an unchanged `generatedMs` and texture count.
   },
 });
