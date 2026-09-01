@@ -31,6 +31,9 @@ function tsFilesUnder(dir: string): string[] {
   return found;
 }
 
+/** The single module allowed to reach the renderer (005 plan, US4 T024). */
+const THREE_BOUNDARY = 'texture-adapter.ts';
+
 const materialFiles = tsFilesUnder(MATERIALS_DIR).sort();
 const sources = new Map(materialFiles.map((path) => [path, readFileSync(path, 'utf8')]));
 
@@ -49,9 +52,23 @@ describe('generating-path purity', () => {
     );
   });
 
-  it.each(materialFiles)('%s imports three nowhere', (path: string) => {
-    expect(THREE_IMPORT.test(sources.get(path)!)).toBe(false);
+  // US4 adds the one exception the plan names: `texture-adapter.ts`, where a
+  // finished buffer becomes a DataTexture. Naming it tightens this check rather
+  // than relaxing it — the set of files importing three must be exactly that
+  // one, so a second renderer import anywhere under `src/materials/` fails here.
+  it('confines three to the texture adapter, and to nothing else', () => {
+    const importers = materialFiles
+      .filter((path) => THREE_IMPORT.test(sources.get(path)!))
+      .map((path) => path.slice(MATERIALS_DIR.length));
+    expect(importers).toEqual([THREE_BOUNDARY]);
   });
+
+  it.each(materialFiles.filter((path) => !path.endsWith(THREE_BOUNDARY)))(
+    '%s imports three nowhere',
+    (path: string) => {
+      expect(THREE_IMPORT.test(sources.get(path)!)).toBe(false);
+    },
+  );
 
   it.each(materialFiles)('%s touches no browser API', (path: string) => {
     const match = DOM_GLOBAL.exec(sources.get(path)!);
