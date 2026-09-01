@@ -3,6 +3,9 @@ import {
   BoxGeometry,
   LinearFilter,
   LinearMipmapLinearFilter,
+  LinearMipmapNearestFilter,
+  NearestMipmapLinearFilter,
+  NearestMipmapNearestFilter,
   LinearSRGBColorSpace,
   Mesh,
   RepeatWrapping,
@@ -13,6 +16,7 @@ import { buildMaterialMaps, MAPS_PER_MATERIAL } from '../../src/materials/maps';
 import { MATERIAL_NAMES, type MaterialName } from '../../src/materials/table';
 import {
   MATERIAL_ANISOTROPY,
+  MATERIAL_MIN_FILTER,
   adaptMaterial,
   adaptedMaterials,
   resetMaterialCache,
@@ -56,6 +60,22 @@ describe('the texture adapter (US4-S5)', () => {
     resetMaterialCache();
   });
 
+  // The declared minification filter is only allowed to be one that actually
+  // samples the chain. Asserting `minFilter === MATERIAL_MIN_FILTER` alone is
+  // tautological — it would still pass if the constant were retuned to
+  // `LinearFilter`, which is exactly US4-S5's failure — so the constant itself
+  // is pinned to the set of mipmap-sampling filters here.
+  const MIPMAP_MIN_FILTERS = [
+    NearestMipmapNearestFilter,
+    NearestMipmapLinearFilter,
+    LinearMipmapNearestFilter,
+    LinearMipmapLinearFilter,
+  ];
+
+  it('declares a minification filter that samples the mipmap chain', () => {
+    expect(MIPMAP_MIN_FILTERS).toContain(MATERIAL_MIN_FILTER);
+  });
+
   it('mipmaps every uploaded map and filters it with a mipmap filter', () => {
     expect(MATERIAL_ANISOTROPY).toBeGreaterThan(1);
     adaptMaterial(mapsOf('brick'));
@@ -67,7 +87,7 @@ describe('the texture adapter (US4-S5)', () => {
       // NearestFilter, and a nearest minification filter never samples a mipmap
       // and ignores anisotropy entirely.
       expect(texture.generateMipmaps).toBe(true);
-      expect(texture.minFilter).toBe(LinearMipmapLinearFilter);
+      expect(texture.minFilter).toBe(MATERIAL_MIN_FILTER);
       expect(texture.magFilter).toBe(LinearFilter);
       expect(texture.anisotropy).toBe(MATERIAL_ANISOTROPY);
       expect(texture.wrapS).toBe(RepeatWrapping);
@@ -116,7 +136,7 @@ describe('one map set per material (US4-S3)', () => {
     expect(probe.withoutAlbedo).toBe(0);
     expect(probe.mipmapped).toBe(true);
     expect(probe.anisotropy).toEqual([MATERIAL_ANISOTROPY]);
-    expect(probe.minFilters).toEqual([LinearMipmapLinearFilter]);
+    expect(probe.minFilters).toEqual([MATERIAL_MIN_FILTER]);
   });
 
   it('sees through the sharing when one mesh is given its own copy', () => {

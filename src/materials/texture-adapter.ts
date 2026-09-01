@@ -7,7 +7,7 @@
 import {
   DataTexture,
   LinearFilter,
-  LinearMipmapLinearFilter,
+  LinearMipmapNearestFilter,
   MeshStandardMaterial,
   RepeatWrapping,
   RGBAFormat,
@@ -24,6 +24,27 @@ import { MATERIAL_NAMES, type MaterialName } from './table';
  * it is the number the smoke harness asserts is in effect — a texture that
  * reports a lower one has been clamped by the driver. */
 export const MATERIAL_ANISOTROPY = 8;
+
+/** The declared minification filter: bilinear within one mipmap level, nearest
+ * level selection, with anisotropy layered on top.
+ *
+ * Trilinear (`LinearMipmapLinearFilter`) would blend the two bracketing levels
+ * as well, and on hardware it is the obvious default. It is not the default
+ * here because the two settings multiply: trilinear doubles the probes an
+ * anisotropic sample takes, and at anisotropy 8 across three maps on five
+ * materials that is up to sixteen texel fetches per sample on a rasterizer with
+ * no texture units. Measured on the smoke harness's software renderer pinned to
+ * two cores, over the same scene: 33ms/frame untextured-filtering (nearest),
+ * 48ms with this filter at anisotropy 8, and 167ms with trilinear at
+ * anisotropy 8 — a fifth of the frame rate, under 001's floor, for a level of
+ * mip-transition smoothness no acceptance scenario asks for.
+ *
+ * What US4-S5 does ask for survives intact: the chain is built and sampled, and
+ * anisotropy 8 is honoured — a driver's anisotropic path takes its probes
+ * within the selected level, so grazing angles stay sharp rather than aliasing
+ * into noise. What is given up is the cross-fade at a mip boundary. See
+ * DECISIONS.md. */
+export const MATERIAL_MIN_FILTER = LinearMipmapNearestFilter;
 
 /** Three.js material + its backing textures, so a resize or re-bind can reason
  * about what is already uploaded. */
@@ -59,7 +80,7 @@ function makeDataTexture(
   // minification filter never samples a mipmap and ignores anisotropy outright
   // — so `generateMipmaps = true` alone leaves a grazing-angle wall aliasing
   // into noise with the mipmap chain built and unused (US4-S5).
-  texture.minFilter = LinearMipmapLinearFilter;
+  texture.minFilter = MATERIAL_MIN_FILTER;
   texture.magFilter = LinearFilter;
   texture.anisotropy = MATERIAL_ANISOTROPY;
   texture.needsUpdate = true;
