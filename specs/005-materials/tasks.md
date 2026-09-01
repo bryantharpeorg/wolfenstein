@@ -98,43 +98,66 @@ is bound to geometry.
 
 ---
 
-## Phase 3: User Story 3 - Materials bound to merged geometry without breaking the budget (Priority: P1)
+## Phase 3: User Story 3 - Materials bound to merged geometry (Priority: P1)
 
 **Goal**: Every surface in the level is textured — walls by type, doors, secrets, floor
-and ceiling — tiling once per world tile across merged runs, with the draw-call ceiling
-002 won still intact.
+and ceiling — with the draw-call ceiling 002 won still intact.
 
-**Independent Test**: In unit tests, assert a merged run of N tiles spans N UV units and
-adjacent faces agree at a shared edge; then load the built page headlessly and assert
+**Independent Test**: Load the built page headlessly and assert
 `window.__diag.materials.untexturedMeshes` is 0 and `window.__diag.drawCalls` is under 20.
 
 ### Tests for User Story 3
 
 > Write these first and confirm they fail before implementing.
 
-- [ ] T020 [P] [US3] `tests/unit/materials-uv.test.ts`: UVs computed for a merged run of N tiles span exactly N UV units on the run's long axis, one repeat per tile edge; two adjacent faces of the same material agree at their shared edge within the declared epsilon; no face is stretched (FR-009, US3-S5, US3-S6).
 - [ ] T021 [P] [US3] `tests/unit/materials-bindings.test.ts`: every wall type ID 002 declares maps to exactly one of the five materials; an ID with no entry resolves to 002's declared default material rather than to nothing; doors, secrets, floor and ceiling each resolve to a declared material, and a door's material differs from the wall type beside it (FR-008, US3-S1, US3-S3, US3-S4).
 
 ### Implementation for User Story 3
 
 - [ ] T022 [US3] Create `src/materials/bindings.ts` mapping 002's wall type IDs, plus doors, secrets, floor and ceiling, onto the five material names US1's material table declares, with an unmapped ID resolving to 002's declared default material and the substitution passed to `recordFallback()` (FR-008, US3-S1, US3-S3, US3-S4).
-- [ ] T023 [US3] Create `src/materials/uv.ts` exporting a pure `computeTileUVs(positions, normals)` that derives UVs in world-tile space at one repeat per tile edge — so a merge boundary is not a UV boundary — with the tile edge and the agreement epsilon as named constants in that file (FR-009, US3-S5, US3-S6).
-- [ ] T024 [US3] Create `src/materials/texture-adapter.ts`, the only module in `src/materials/` that imports `three`: it wraps a finished buffer into a `DataTexture` with `RepeatWrapping`, mipmaps and the declared anisotropy constant, colour-space sRGB for albedo and linear for normal and roughness (FR-011, US3-S10).
-- [ ] T025 [US3] Extend `src/materials/texture-adapter.ts` with a per-name cache that builds exactly one `MeshStandardMaterial` per material, shared by every mesh that uses it, so five materials upload one set of maps each rather than one set per mesh (FR-010, US3-S8).
 - [ ] T026 [US3] Create `src/systems/materials/register.ts` registering a system with an `order` above 002's level-geometry system, whose `setup` builds every map set once through `src/materials/maps.ts` and assigns the shared materials to the merged per-wall-type meshes, the door and secret meshes from 004, and the floor and ceiling meshes, via `src/materials/bindings.ts` (FR-008, US3-S1, US3-S3, US3-S4).
-- [ ] T027 [US3] Extend `src/systems/materials/register.ts` to write each merged `BufferGeometry`'s UV attribute from `src/materials/uv.ts` before the material is attached, so a 20-tile wall run reads as twenty bricks rather than one stretched brick (FR-009, US3-S5, US3-S6).
-- [ ] T028 [US3] Extend `src/systems/materials/register.ts` to walk the scene once after setup, count meshes whose material carries no albedo map, and publish `untexturedMeshes`, `textureCount`, `bytes` and `generatedMs` through `publishMaterialDiagnostics()` (FR-008, FR-010, US3-S2, US3-S8).
-- [ ] T029 [US3] Give `src/systems/materials/register.ts` a `resize` hook that re-attaches nothing and regenerates no texture, so a viewport change leaves `generatedMs` and the uploaded texture count unchanged (FR-011, US3-S9).
-- [ ] T030 [US3] Make the single edit this spec makes to `tools/smoke.mjs`: after `__diag` is read back, discover `tools/smoke-checks/*.mjs` and run each module's exported check against it — the same glob seam `src/boot/discover.ts` uses, so US4 and every later spec add an assertion by adding a file rather than by editing this one (FR-010, US3-S7).
-- [ ] T031 [US3] Create `tools/smoke-checks/materials.mjs` asserting `__diag.materials.untexturedMeshes` is 0, `__diag.drawCalls` is under 20 at the spawn tile and three further camera positions, exactly one map set exists per material, and generation time is unchanged after a viewport resize — printing which condition failed and exiting non-zero (FR-008, FR-010, FR-011, US3-S2, US3-S7, US3-S8, US3-S9).
+- [ ] T028 [US3] Extend `src/systems/materials/register.ts` to walk the scene once after setup, count meshes whose material carries no albedo map, and publish `untexturedMeshes`, `textureCount`, `bytes` and `generatedMs` through `publishMaterialDiagnostics()` (FR-008, FR-010, US3-S2).
+- [ ] T030 [US3] Make the single edit this spec makes to `tools/smoke.mjs`: after `__diag` is read back, discover `tools/smoke-checks/*.mjs` and run each module's exported check against it — the same glob seam `src/boot/discover.ts` uses, so US4 and every later spec add an assertion by adding a file rather than by editing this one (FR-010, US3-S5).
+- [ ] T031 [US3] Create `tools/smoke-checks/materials.mjs` asserting `__diag.materials.untexturedMeshes` is 0 and `__diag.drawCalls` is under 20 at the spawn tile and three further camera positions — printing which condition failed and exiting non-zero (FR-008, FR-010, US3-S2, US3-S5).
 
-**Checkpoint**: the milestone's DONE condition is machine-checked — no untextured
-surface, tiling correct across merges, and 002's draw-call achievement survived being
-skinned. The level is fully textured and still flat-lit.
+**Checkpoint**: the milestone's DONE condition is machine-checked — no untextured surface,
+and 002's draw-call achievement survived being skinned. The level is fully textured, still
+flat-lit, and not yet asserted for tiling or cost.
 
 ---
 
-## Phase 4: User Story 4 - Shadow-mapped lights, ambient and fog (Priority: P2)
+## Phase 4: User Story 4 - Tiling, texture economy and the frame budget (Priority: P1)
+
+**Goal**: The texture tiles once per world tile across merged runs, exactly one map set
+exists per material, surfaces stay sharp at grazing angles, and the textured level holds
+its frame rate with the enemy system live.
+
+**Independent Test**: In unit tests, assert a merged run of N tiles spans N UV units and
+adjacent faces agree at a shared edge; then run `npm run smoke` with the enemy system live
+and assert it clears the declared FPS floor.
+
+### Tests for User Story 4
+
+> Write these first and confirm they fail before implementing.
+
+- [ ] T020 [P] [US4] `tests/unit/materials-uv.test.ts`: UVs computed for a merged run of N tiles span exactly N UV units on the run's long axis, one repeat per tile edge; two adjacent faces of the same material agree at their shared edge within the declared epsilon; no face is stretched (FR-009, US4-S1, US4-S2).
+
+### Implementation for User Story 4
+
+- [ ] T023 [US4] Create `src/materials/uv.ts` exporting a pure `computeTileUVs(positions, normals)` that derives UVs in world-tile space at one repeat per tile edge — so a merge boundary is not a UV boundary — with the tile edge and the agreement epsilon as named constants in that file (FR-009, US4-S1, US4-S2).
+- [ ] T024 [US4] Create `src/materials/texture-adapter.ts`, the only module in `src/materials/` that imports `three`: it wraps a finished buffer into a `DataTexture` with `RepeatWrapping`, mipmaps and the declared anisotropy constant, colour-space sRGB for albedo and linear for normal and roughness (FR-011, US4-S5).
+- [ ] T025 [US4] Extend `src/materials/texture-adapter.ts` with a per-name cache that builds exactly one `MeshStandardMaterial` per material, shared by every mesh that uses it, so five materials upload one set of maps each rather than one set per mesh (FR-011, US4-S3).
+- [ ] T027 [US4] Extend `src/systems/materials/register.ts` to write each merged `BufferGeometry`'s UV attribute from `src/materials/uv.ts` before the material is attached, so a 20-tile wall run reads as twenty bricks rather than one stretched brick (FR-009, US4-S1, US4-S2).
+- [ ] T029 [US4] Give `src/systems/materials/register.ts` a `resize` hook that re-attaches nothing and regenerates no texture, so a viewport change leaves `generatedMs` and the uploaded texture count unchanged (FR-011, US4-S4).
+- [ ] T040 [US4] Move map derivation off the animation frame — generate on a worker, or cut the work into per-frame steps — so that building five materials never occupies a frame the page owes the render loop. The floor is not to be lowered; the cost moves (FR-011, US4-S6).
+- [ ] T041 [US4] Extend `tools/smoke-checks/materials.mjs` with the cost assertions: exactly one map set exists per material, generation time is unchanged after a viewport resize, and `npm run smoke` clears the declared FPS floor with the enemy system live — printing which condition failed and exiting non-zero (FR-009, FR-011, US4-S3, US4-S4, US4-S6).
+
+**Checkpoint**: tiling is correct across merges, five materials upload one map set each,
+and the textured level holds its frame rate alongside the enemies.
+
+---
+
+## Phase 5: User Story 5 - Shadow-mapped lights, ambient and fog (Priority: P2)
 
 **Goal**: The level is lit rather than merely visible — point lights that cast shadows,
 an ambient floor that keeps corners readable, and fog that gives the maze depth without
@@ -145,21 +168,21 @@ shadow-map size, shadow flag and fog parameters equal their declared constants; 
 occluded floor sample is measurably darker than the same sample unoccluded; assert `fps`
 is at or above 001's harness floor and `drawCalls` is still under 20.
 
-### Tests for User Story 4
+### Tests for User Story 5
 
 > Write these first and confirm they fail before implementing.
 
-- [ ] T032 [P] [US4] `tests/unit/lighting-rig.test.ts`: the rig reports the declared light count, shadow-map size, depth bias and ambient level; every planned light sits on a walkable tile of 002's grid; and the fog far distance exceeds the shipped level's longest sight-line so the exit tile stays discernible from the far end of it (FR-012, FR-013, US4-S1, US4-S4).
+- [ ] T032 [P] [US5] `tests/unit/lighting-rig.test.ts`: the rig reports the declared light count, shadow-map size, depth bias and ambient level; every planned light sits on a walkable tile of 002's grid; and the fog far distance exceeds the shipped level's longest sight-line so the exit tile stays discernible from the far end of it (FR-012, FR-013, US5-S1, US5-S4).
 
-### Implementation for User Story 4
+### Implementation for User Story 5
 
-- [ ] T033 [US4] Create `src/lighting/constants.ts` holding the whole `LightingRig` — point-light count, shadow-map size, depth bias, ambient level, fog colour, fog near and fog far — so tuning any of them is one edit in one file and a bias that causes acne is a one-line change (FR-012, FR-013, US4-S1, Edge Cases).
-- [ ] T034 [US4] Create `src/lighting/rig.ts` as a pure, three.js-free planner that turns 002's grid and its spawn and exit anchors into light placements and a fog range, so placement is asserted under `npm run test` rather than eyeballed (FR-012, FR-013, US4-S1, US4-S4).
-- [ ] T035 [US4] Create `src/systems/lighting/register.ts` registering a system that adds the planned `PointLight`s with shadows, the ambient term and the scene fog from `src/lighting/constants.ts`, enabling the renderer's shadow map through a cast local to this file rather than widening `GameContext` in the shared `src/boot/registry.ts` (FR-012, FR-013, US4-S1, US4-S3).
-- [ ] T036 [US4] Extend `src/systems/lighting/register.ts` with a harness-only probe that renders a declared floor region with its occluding wall shown and hidden and returns both mean luminances, plus a sample from an unlit corner — the evidence that shadows are cast rather than merely enabled and that no corner is pure black (US4-S2, US4-S3).
-- [ ] T037 [US4] Extend `src/systems/lighting/register.ts` to publish `lights` and `shadowsEnabled` through `publishMaterialDiagnostics()`, completing `window.__diag.materials` as an object additive over the 001–004 contracts with no existing field renamed, removed or repurposed (FR-015, US4-S7).
-- [ ] T038 [US4] Extend `src/systems/lighting/register.ts` so that if shadow-mapped point lights cannot be made to work on the active backend, the level ships with ambient and fog only, every surface still textured, `shadowsEnabled` reads false and `recordFallback()` carries the reason; when that path is taken, append the one line FR-014 requires to the repository's decision log — the epic degrades rather than stalling (FR-014, US4-S6).
-- [ ] T039 [US4] Create `tools/smoke-checks/lighting.mjs` asserting the light count, shadow-map size, shadow flag and fog parameters match their declared constants, that the probe's occluded sample is darker than its unoccluded one and its corner sample is not black, and that `__diag.fps` after 120 frames is at or above 001's declared floor — failing non-zero and naming the condition, including when `untexturedMeshes` is above zero or `drawCalls` reaches 20 (FR-016, US4-S1, US4-S2, US4-S3, US4-S4, US4-S5, US4-S8).
+- [ ] T033 [US5] Create `src/lighting/constants.ts` holding the whole `LightingRig` — point-light count, shadow-map size, depth bias, ambient level, fog colour, fog near and fog far — so tuning any of them is one edit in one file and a bias that causes acne is a one-line change (FR-012, FR-013, US5-S1, Edge Cases).
+- [ ] T034 [US5] Create `src/lighting/rig.ts` as a pure, three.js-free planner that turns 002's grid and its spawn and exit anchors into light placements and a fog range, so placement is asserted under `npm run test` rather than eyeballed (FR-012, FR-013, US5-S1, US5-S4).
+- [ ] T035 [US5] Create `src/systems/lighting/register.ts` registering a system that adds the planned `PointLight`s with shadows, the ambient term and the scene fog from `src/lighting/constants.ts`, enabling the renderer's shadow map through a cast local to this file rather than widening `GameContext` in the shared `src/boot/registry.ts` (FR-012, FR-013, US5-S1, US5-S3).
+- [ ] T036 [US5] Extend `src/systems/lighting/register.ts` with a harness-only probe that renders a declared floor region with its occluding wall shown and hidden and returns both mean luminances, plus a sample from an unlit corner — the evidence that shadows are cast rather than merely enabled and that no corner is pure black (US5-S2, US5-S3).
+- [ ] T037 [US5] Extend `src/systems/lighting/register.ts` to publish `lights` and `shadowsEnabled` through `publishMaterialDiagnostics()`, completing `window.__diag.materials` as an object additive over the 001–004 contracts with no existing field renamed, removed or repurposed (FR-015, US5-S7).
+- [ ] T038 [US5] Extend `src/systems/lighting/register.ts` so that if shadow-mapped point lights cannot be made to work on the active backend, the level ships with ambient and fog only, every surface still textured, `shadowsEnabled` reads false and `recordFallback()` carries the reason; when that path is taken, append the one line FR-014 requires to the repository's decision log — the epic degrades rather than stalling (FR-014, US5-S6).
+- [ ] T039 [US5] Create `tools/smoke-checks/lighting.mjs` asserting the light count, shadow-map size, shadow flag and fog parameters match their declared constants, that the probe's occluded sample is darker than its unoccluded one and its corner sample is not black, and that `__diag.fps` after 120 frames is at or above 001's declared floor — failing non-zero and naming the condition, including when `untexturedMeshes` is above zero or `drawCalls` reaches 20 (FR-016, US5-S1, US5-S2, US5-S3, US5-S4, US5-S5, US5-S8).
 
 **Checkpoint**: all four gates green on a lit, fogged, fully textured level, with every
 claim in this spec readable from `npm run test` or `npm run smoke` and none of it from a
