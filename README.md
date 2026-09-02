@@ -22,7 +22,8 @@ npm run build
 npm run preview
 ```
 
-Uses WebGPU when the browser offers it, WebGL otherwise.
+Renders with WebGL. WebGPU is opt-in behind a `?webgpu` query parameter and is
+currently known-broken — see `DECISIONS.md` and 001's FR-003.
 
 ### Controls
 
@@ -59,10 +60,15 @@ operator notes on the model underneath.
 
 - [`wolfenstein-prompt.md`](wolfenstein-prompt.md) — the original brief
 - [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — binding rules every build agent obeys
-- [`factory.yaml`](factory.yaml) — what "green" means here
+- [`ergane.yaml`](ergane.yaml) — what "green" means here
 - `DECISIONS.md` — created during the build; records design forks and any fallback that was taken
 
 ## Status
 
-Specs written, implementation not yet started. The `specs/` directory is complete and
-validated against Ergane's Work Graph deriver; `src/` arrives with the first epic.
+**Playable and published: <https://bryantharpeorg.github.io/wolfenstein/>**
+
+28 of 29 stories have landed across all 8 epics — level, movement, doors and keys,
+procedural materials, enemies, three weapons, HUD, post-processing, audio and the exit.
+The one unbuilt story is `005-materials` US5 (shadow-mapped lights, ambient and fog).
+
+Deploys to GitHub Pages from `main` on every landing, via `.github/workflows/pages.yml`.

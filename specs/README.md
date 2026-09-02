@@ -6,17 +6,31 @@ each spec's Work Graph assumes the previous spec has landed.
 
 | Spec | Milestone | Ships | Nodes |
 |---|---|---|---|
-| `001-scaffold` | M0 | Vite+TS+three.js, WebGPU/WebGL renderer, resize, perf overlay, smoke harness | 3 |
+| `001-scaffold` | M0 | Vite+TS+three.js, WebGL renderer (WebGPU behind `?webgpu`), resize, perf overlay, smoke harness | 3 |
 | `002-map-geometry` | M1 | 64×64 level grid, merged BufferGeometry, <20 draw calls | 3 |
 | `003-player` | M2 | Capsule collider, grid-swept AABB collision, mouselook, head-bob | 3 |
 | `004-interaction` | M3 | Sliding doors, silver/gold keys, locked doors, push-wall secrets | 3 |
-| `005-materials` | M4 | Procedural albedo/normal/roughness at 512px, shadows, fog | 4 |
+| `005-materials` | M4 | Procedural albedo/normal/roughness at 512px, shadows, fog | 5 |
 | `006-enemies` | M5 | Guard state machine, A\* pathing, LOS, 8-angle billboards | 4 |
 | `007-combat-hud` | M6 | Three weapons, hitscan, ammo, HUD, pickups, death/restart | 4 |
 | `008-polish` | M7 | Post-processing, procedural audio, elevator exit, stats screen | 4 |
 
 29 nodes across 8 epics, 120 functional requirements, every one implemented by exactly one
 story. `node tools/validate-specs.mjs` is the check, and it must be green before dispatch.
+
+**Build state, 2026-09-01.** 28 of 29 stories have landed and the game is playable and
+published. The one unbuilt story is `005-materials` US5 (shadow-mapped lights, ambient and
+fog, FR-012/013/014) — nothing under `src/lighting/` exists, there is no `Fog` in the tree,
+and `__diag.materials.lights` and `.shadowsEnabled` are declared but never written. It is
+the only story in the spec set with zero implementing files. Two 005 US4 tasks are also
+outstanding (T040 move derivation off the animation frame, T041 the cost assertions in
+`tools/smoke-checks/materials.mjs`). Note that the 005 row above read `4` until today: the
+US3/US4 split landed on 2026-08-31 and the table was never updated.
+
+**Not covered by any spec:** deployment. The game is published to GitHub Pages by
+`.github/workflows/pages.yml` and is live, but no spec, FR or gate describes that surface —
+so the artifact users actually load is the one artifact nothing verifies. Filed as
+`spec/shipped-surface-outside-every-spec-is-ungated`.
 
 Every spec's `spec.md` carries a `## Work Graph` section that Ergane compiles
 mechanically into its dispatch DAG. The grammar is exact — the deriver rejects the
