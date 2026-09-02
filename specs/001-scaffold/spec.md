@@ -73,8 +73,10 @@ on its intended backend with no console error.
 
 **Acceptance Scenarios**:
 
-1. **Given** a browser where `navigator.gpu` exists, **When** the page loads, **Then**
-   the active renderer backend is reported as `webgpu`.
+1. **Given** a browser where `navigator.gpu` exists, **When** the page loads without
+   `?webgpu`, **Then** the active renderer backend is reported as `webgl` and the scene
+   renders. **When** the page loads with `?webgpu`, **Then** the active backend is
+   reported as `webgpu`.
 2. **Given** a browser where `navigator.gpu` is absent, **When** the page loads,
    **Then** the active renderer backend is reported as `webgl` and the scene renders.
 3. **Given** either pass, **When** the first frame completes, **Then** at least one
@@ -153,9 +155,17 @@ the harness exits non-zero citing it.
 - **FR-002**: The repository MUST contain no binary asset files (`.png`, `.jpg`,
   `.jpeg`, `.gif`, `.webp`, `.mp3`, `.wav`, `.ogg`, `.glb`, `.gltf`, `.fbx`, `.ttf`,
   `.woff`) at any path, at every commit.
-- **FR-003**: The application MUST select `WebGPURenderer` when `navigator.gpu` exists
-  and `WebGLRenderer` otherwise, resolving that choice before scene construction
-  begins, with a single code path that starts the frame loop.
+- **FR-003**: The application MUST select `WebGLRenderer` by default, and MUST select
+  `WebGPURenderer` only when the page is loaded with the `?webgpu` query parameter AND
+  `navigator.gpu` exists, resolving that choice before scene construction begins, with a
+  single code path that starts the frame loop.
+
+  *Amended 2026-09-01.* This requirement originally mandated WebGPU wherever
+  `navigator.gpu` existed. That shipped a black screen to every WebGPU-capable visitor of
+  the published site: three r167 constructs the renderer, reports no error, and draws
+  nothing. WebGL is the only backend any gate has ever executed (see SC-002), so it is the
+  only backend with evidence behind it, and it is now the default. WebGPU is retained
+  behind `?webgpu` so the path stays reachable for the fix. See `DECISIONS.md`.
 - **FR-004**: The application MUST render a human-readable message naming the failed
   backend if renderer creation throws, rather than leaving an empty canvas or throwing
   uncaught.
@@ -197,9 +207,16 @@ the harness exits non-zero citing it.
 
 - **SC-001**: A clean clone reaches a rendered frame with `npm install && npm run dev`
   and no other human action, verified from a scratch directory.
-- **SC-002**: Both renderer backends are exercised by the smoke gate on every node
-  verification (WebGPU pass and WebGL-fallback pass), each reporting its expected
-  backend.
+- **SC-002**: The WebGL backend is exercised by the smoke gate on every node
+  verification, in both a default pass and a no-GPU pass, each reporting `webgl`.
+
+  *Amended 2026-09-01. KNOWINGLY UNMET for WebGPU.* This criterion previously claimed
+  both backends were exercised. They never were: the gate runs headless Chromium, which
+  exposes no `navigator.gpu`, so both passes have always been WebGL and the WebGPU path
+  has never drawn a verified frame. Restoring two-backend coverage needs a gate variant
+  that can reach WebGPU (headless Chrome via SwiftShader with flags). Until then, no
+  WebGPU claim in this spec set is backed by evidence. Filed as
+  `gates/headless-gate-cannot-execute-the-default-runtime-path`.
 - **SC-003**: A deliberately introduced startup exception causes `npm run smoke` to
   exit non-zero, demonstrated once and kept as a harness self-test.
 - **SC-004**: Zero binary asset files exist in the repository at any commit, enforced by

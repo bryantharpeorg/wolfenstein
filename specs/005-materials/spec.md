@@ -185,8 +185,12 @@ face carries UVs whose span equals its world-space extent in tiles; then run
 4. **Given** the running page, **When** the viewport is resized, **Then** no texture is
    regenerated and generation time in diagnostics is unchanged.
 5. **Given** any textured surface viewed at a grazing angle across the level's longest
-   corridor, **When** rendered, **Then** mipmaps and a declared anisotropy level are in
-   effect and the surface does not alias into noise.
+   corridor, **When** rendered, **Then** the declared filtering and anisotropy constants
+   are in effect. *Amended 2026-09-01: the original scenario also required that the
+   surface "does not alias into noise". That is KNOWINGLY UNMET — nearest filtering at a
+   grazing angle is precisely the aliasing case, and the cheaper filter is what keeps
+   US4-S6's FPS floor green on a software renderer. The two scenarios are in direct
+   tension; S6 wins until derivation cost drops. See FR-011 and `DECISIONS.md`.*
 6. **Given** materials applied and the enemy system live, **When** `npm run smoke` runs on
    a software renderer, **Then** it clears the declared FPS floor. The floor is not to be
    lowered to pass this scenario; derivation cost may move (cache, defer, precompute at
@@ -318,8 +322,18 @@ harness floor and that `drawCalls` is still under 20.
 - **FR-010**: The textured level MUST report fewer than 20 draw calls from
   `window.__diag.drawCalls` at any camera position, and exactly one set of maps per
   material SHALL be uploaded and shared by every mesh using it.
-- **FR-011**: Textures SHALL be mipmapped with a declared anisotropy level and MUST NOT be
-  regenerated on window resize.
+- **FR-011**: Textures MUST NOT be regenerated on window resize, and SHALL declare their
+  filtering and anisotropy as named constants.
+
+  *Amended 2026-09-01. The mipmap clause is KNOWINGLY UNMET.* The adapter keeps
+  `DataTexture`'s default `NearestFilter`, and three only builds a mip chain when
+  `minFilter` is neither `NearestFilter` nor `LinearFilter` — so `generateMipmaps = true`
+  has always been inert here, and `MATERIAL_ANISOTROPY` is now `1` because WebGPU rejects
+  any sampler combining `maxAnisotropy > 1` with a non-linear filter. Switching to
+  trilinear was tried and reverted: it sank the software-rendered smoke pass to 3.9 fps
+  against a floor of 5 (US4-S6 forbids lowering that floor). Restoring real mipmapping
+  therefore requires making generation cheaper first, not just changing the filters. See
+  `DECISIONS.md`.
 - **FR-012**: The scene SHALL include at least two shadow-mapped point lights whose count,
   shadow-map size and depth bias are declared constants, such that a surface occluded from
   a light is measurably darker than the same surface unoccluded.
