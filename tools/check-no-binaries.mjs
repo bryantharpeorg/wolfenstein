@@ -18,6 +18,10 @@ const FORBIDDEN = new Set([
   '.woff',
 ]);
 
+/** Directories whose contents are build output or version-control internals rather than
+ *  source, and are therefore not subject to Constitution II. */
+const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', '.git', 'playtest', '.playtest-staging']);
+
 /**
  * Recursively walks `root` and returns an array of violation messages for any
  * file whose extension is in the forbidden list.
@@ -48,7 +52,11 @@ export function walkAndReport(root) {
     for (const entry of entries) {
       const full = join(current, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.git') {
+        // Build output, not source. `playtest/` holds the video `npm run play` records
+        // (009 FR-005): it is gitignored like `dist/` and skipped here for the same reason,
+        // and the forbidden list below is deliberately NOT extended with video extensions —
+        // that would fail the smoke gate on the playtest runner's own output.
+        if (SKIPPED_DIRECTORIES.has(entry.name)) {
           continue;
         }
         queue.push(full);

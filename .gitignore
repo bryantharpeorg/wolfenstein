@@ -29,6 +29,15 @@ coverage/
 test-results/
 playwright-report/
 
+# 009's playtest record: video and results written by `npm run play`, replaced on every
+# invocation. Build output in the sense dist/ is, not a repository asset — the recordings
+# are also skipped by tools/check-no-binaries.mjs, and *.webm/*.mp4 are listed so a
+# recording can never be staged by hand either. See DECISIONS.md, 2026-09-02.
+playtest/
+.playtest-staging/
+*.webm
+*.mp4
+
 .DS_Store
 .env
 .env.*
