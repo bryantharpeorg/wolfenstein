@@ -37,6 +37,18 @@ currently known-broken — see `DECISIONS.md` and 001's FR-003.
 | 1 / 2 / 3 | Pistol / SMG / Chaingun |
 | Esc | Release pointer |
 
+### The reticle
+
+The crosshair at the centre of the screen is four strokes generated from code — no
+image, no font — the same constraint every texture and glyph here answers to. It is
+drawn on its own quad over the post-processing chain, so no bloom, blur or grain
+touches it, and it stays centred with arms of a constant pixel length across any
+window resize. Its gap is not a fixed taste: it widens with the weapon's declared
+spread — the pistol rests tight, the chaingun open — and reacts to your movement and
+fire, so the reticle shows the accuracy you actually have at that instant, and marks
+your hits and kills. A toggle key for it lands with the diagnostics story; it is
+always on until then.
+
 ## Checking it
 
 ```bash
