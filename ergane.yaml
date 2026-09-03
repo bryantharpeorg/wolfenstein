@@ -5,7 +5,10 @@
 # Renamed factory.yaml -> ergane.yaml 2026-08-29: 0.5.0 prefers the new name and
 # `resolve_manifest_path` lets ergane.yaml shadow a legacy factory.yaml silently.
 
-version: 1
+# Schema v2 since 2026-09-03, and the bump has exactly one purpose: `ladder:` is a
+# v2-only key, and v1 refuses it as unknown rather than ignoring it. Everything else
+# in this file is a v1 key that v2 still recognises, so nothing below changed meaning.
+version: 2
 
 runtime: bwrap
 
@@ -39,3 +42,45 @@ standards: .specify/memory/constitution.md
 
 # The branch the factory lands on. Declared by the operator, never by a node.
 landing_branch: main
+
+# The retry ladder. Every dial here is a platform default EXCEPT `promotion_persona`,
+# which is the whole reason this block exists. Rung order is fixed in code
+# (factory/verify/ladder.py:206-216), not by the order of these keys:
+#
+#     implementer x3  ->  promoter x1  ->  debugger x1  ->  escalate to the operator
+#     glm-5.3-flash       claude-opus-5    claude-opus-5
+#     metered             subscription     subscription
+#
+# `promotion_persona` names a ROLE, never a model: constitution VII keeps model names in
+# ~/.config/ergane/personas.yaml alone, so this file says `promoter` and learns nothing
+# about Opus. The models above are a comment, and a comment can go stale -- personas.yaml
+# is the truth. Naming the persona here is what makes the rung exist at all: `promoter`
+# has been defined since 2026-08-28 and had never once fired, because no manifest on this
+# floor had ever named it and `_promotion_available()` returns False when
+# `promotion_persona` is None. Defining a persona does not create a rung; this line does.
+#
+# The rung fires only after the ordinary budget is spent, and a promoted attempt does not
+# consume that budget (`_attempts_spent` excludes it). That ordering still matters even
+# though rung 2 is now free per token: `promotion_cycles` bounds how often the strongest
+# model on the floor is spent on a story three cheaper attempts could not finish.
+#
+# RUNGS 2 AND 3 SHARE A MODEL and differ by persona -- `promoter` carries [implement, tdd],
+# `debugger` carries [diagnosing-bugs]. That is a different approach on the same weights,
+# not the "retry wearing a hat" personas.yaml warns about. If rung 3 turns out to add
+# nothing over rung 2 in practice, the dial to change is `debugger_cycles: 0`.
+#
+# `max_attempts: 3` is unchanged and deliberate: rung 1 is now fast and cheap rather than
+# slow and free, which is an argument for more swings, but every cycle-time measurement
+# recorded in specs/README.md was taken at 3 and changing both the model and the budget
+# in one move would leave neither attributable.
+#
+# The two dials NOT declared here are defaults on purpose. `max_judge_retries` (2) stays
+# bounded INSIDE `max_attempts`, so the judge can never spend budget the operator did not
+# grant it. `escalation_timeout_s` (3600) is how long an escalation waits on a human
+# before the store writes EXPIRED, which ends the node -- shorten it only if someone is
+# actually watching Telegram.
+ladder:
+  max_attempts: 3
+  promotion_persona: promoter
+  promotion_cycles: 1
+  debugger_cycles: 1
