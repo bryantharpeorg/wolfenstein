@@ -5,6 +5,10 @@ import { dirname, resolve } from 'node:path';
 import {
   crosshairStrokes, type CrosshairStroke,
 } from '../../src/hud/crosshair';
+import {
+  CROSSHAIR_DIAGNOSTIC_FIELDS, createCrosshairDiagnostics, ensureCrosshairDiag,
+} from '../../src/hud/crosshair-diag';
+import { createDiagnostics } from '../../src/diag/diag';
 
 // FR-001 / FR-002, US1-S1 / US1-S2. The reticle's geometry is a pure function:
 // a gap, an arm length and a viewport in, four stroke segments out, as plain
@@ -166,5 +170,26 @@ describe('degenerate inputs still answer with finite coordinates (Edge Cases)', 
     expect(finitePoints(strokesAt(GAP_PX, Number.POSITIVE_INFINITY, VIEWPORT_HEIGHT_PX))).toBe(true);
     expect(finitePoints(strokesAt(GAP_PX, ARM_PX, Number.NaN))).toBe(true);
     expect(finitePoints(strokesAt(Number.NaN, ARM_PX, 0))).toBe(true);
+  });
+});
+
+// FR-005 / US1-S6. The published shape is declared here, zeroed, and attached
+// additively: the fields the smoke harness checks the running page against are
+// the ones this file lists, and nothing 001–009 published moves.
+describe('the crosshair diagnostics shape (FR-005, US1-S6)', () => {
+  it('declares its whole field set, zeroed', () => {
+    const crosshair = createCrosshairDiagnostics();
+    expect(Object.keys(crosshair).sort()).toEqual([...CROSSHAIR_DIAGNOSTIC_FIELDS].sort());
+    // US1-S6 names the three fields the story is verified against.
+    expect(crosshair.gap).toBe(0);
+    expect(crosshair.hidden).toBe(false);
+    expect(crosshair.sourcesDefined).toBe(false);
+  });
+
+  it('attaches additively: every 001–009 field survives, and only `crosshair` is added', () => {
+    const diag = createDiagnostics('webgl');
+    const before = Object.keys(diag).sort();
+    expect(ensureCrosshairDiag(diag)).toBe(ensureCrosshairDiag(diag));
+    expect(Object.keys(diag).sort()).toEqual([...before, 'crosshair'].sort());
   });
 });
