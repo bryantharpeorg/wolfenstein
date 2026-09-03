@@ -48,26 +48,26 @@ landing_branch: main
 # (factory/verify/ladder.py:206-216), not by the order of these keys:
 #
 #     implementer x3  ->  promoter x1  ->  debugger x1  ->  escalate to the operator
-#     glm-5.3-flash       claude-opus-5    claude-opus-5
-#     metered             subscription     subscription
+#     glm-5.3-flash       glm-5.3          claude-opus-5
+#     321B, metered       753B, metered    subscription
+#
+# THREE DIFFERENT WEIGHTS, each stronger than the last. That is the property worth
+# protecting here: a promotion onto the model that just failed is "a retry wearing a hat",
+# in personas.yaml's own words, and a ladder whose rungs differ only by persona has to
+# argue its way out of that. This one does not have to.
 #
 # `promotion_persona` names a ROLE, never a model: constitution VII keeps model names in
 # ~/.config/ergane/personas.yaml alone, so this file says `promoter` and learns nothing
-# about Opus. The models above are a comment, and a comment can go stale -- personas.yaml
+# about GLM. The models above are a comment, and a comment can go stale -- personas.yaml
 # is the truth. Naming the persona here is what makes the rung exist at all: `promoter`
 # has been defined since 2026-08-28 and had never once fired, because no manifest on this
 # floor had ever named it and `_promotion_available()` returns False when
 # `promotion_persona` is None. Defining a persona does not create a rung; this line does.
 #
 # The rung fires only after the ordinary budget is spent, and a promoted attempt does not
-# consume that budget (`_attempts_spent` excludes it). That ordering still matters even
-# though rung 2 is now free per token: `promotion_cycles` bounds how often the strongest
-# model on the floor is spent on a story three cheaper attempts could not finish.
-#
-# RUNGS 2 AND 3 SHARE A MODEL and differ by persona -- `promoter` carries [implement, tdd],
-# `debugger` carries [diagnosing-bugs]. That is a different approach on the same weights,
-# not the "retry wearing a hat" personas.yaml warns about. If rung 3 turns out to add
-# nothing over rung 2 in practice, the dial to change is `debugger_cycles: 0`.
+# consume that budget (`_attempts_spent` excludes it). That ordering is what keeps the cost
+# defensible: rung 2 meters at roughly 9x rung 1 per input token, so it has to stay the
+# exception path. `promotion_cycles` is the dial that would make it the bill.
 #
 # `max_attempts: 3` is unchanged and deliberate: rung 1 is now fast and cheap rather than
 # slow and free, which is an argument for more swings, but every cycle-time measurement
@@ -84,3 +84,21 @@ ladder:
   promotion_persona: promoter
   promotion_cycles: 1
   debugger_cycles: 1
+
+# How wide the floor may run. `max_concurrent_nodes: 2` is not a preference, it is the
+# engine's slot count: two concurrent attempts is the ceiling, and a third caller queues
+# with time-to-first-token collapsing (measured: 4th caller ~52s TTFT against ~17s alone,
+# recorded in specs/README.md). Dispatching wider than the engine is wide does not make
+# the epic faster, it makes every node slower and hides the cause.
+#
+# This is a CEILING, not a target. A spec's Work Graph decides how much parallelism there
+# is to have; this decides how much of it may run at once. 010-crosshair declares US2 and
+# US3 `concurrent_with` each other, which is exactly two -- so that graph can saturate the
+# floor without ever exceeding it.
+#
+# `max_concurrent_epics: 1` keeps that budget inside one epic. Two epics at one node each
+# would satisfy the node cap while making the cross-spec ordering the operator owns
+# ("do not dispatch N+1 before N has landed", specs/README.md) impossible to hold.
+roadmap:
+  max_concurrent_nodes: 2
+  max_concurrent_epics: 1
