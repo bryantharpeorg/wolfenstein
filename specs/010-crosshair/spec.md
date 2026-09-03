@@ -1,6 +1,6 @@
 ---
 state: ready
-depends_on_landed: ["007-combat-hud", "008-polish", "009-playtest-uat"]
+depends_on_landed: ["007-combat-hud", "008-polish"]
 ---
 
 # Feature Specification: Crosshair, Spread Feedback and Hit Confirmation
@@ -306,6 +306,14 @@ crosshair check passes; and `npm run play` reports the crosshair assertions in i
   there, and `npm run play` is a declared script. FR-017 extends that runner, so **US4 has
   no unmet prerequisite**. US2, US3 and US4 of `009` remain unbuilt and are not required
   here.
+- `009-playtest-uat` is deliberately **absent** from `depends_on_landed` above, and that is
+  the point rather than an oversight. That gate is spec-level attestation: it asks whether
+  the whole of `009` has landed, and `009` cannot attest while three of its four stories are
+  unbuilt — so naming it there would block this spec indefinitely on work it does not need.
+  What US4 actually requires is content, and that content is on `main`, which is what the
+  queue checks anyway ("readiness: attestation, plus landings on main"). If `009` US1 were
+  ever reverted from `main`, T023 would fail at its first import rather than being caught by
+  this gate; that is the trade, and it is the right one against a permanent block.
 - `009` US2–US4 are *not* required. FR-017 adds soft criteria to the runner US1 already
   ships; it does not need the objective set, the recorder or the verdict module.
 - The reticle's colour, arm length, recoil amount, decay durations, movement ceiling and
