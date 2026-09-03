@@ -22,9 +22,12 @@ recording is the evidence.
 
 ## Path Conventions
 
-Single project. Everything this spec adds lives under `tools/` and `tests/unit/`; **no file
-under `src/` is created or edited by any task here**, which is the spec's defining property
-and not an accident of scoping. `tools/**/*.mjs` and `tools/**/*.ts` are already inside
+Single project. Everything this spec adds lives under `tools/` and `tests/unit/`, with one
+exception: T012 publishes each guard's position in the diagnostics roster
+(`src/enemy/world.ts`), because aiming needs a bearing and none was published. **No input
+seam is added under `src/`** — that is the spec's defining property, and it is a claim about
+how the agent *acts*, not about which directories it touches. Perception may be extended;
+input may not. `tools/**/*.mjs` and `tools/**/*.ts` are already inside
 `tsconfig.json`'s include, so `npm run typecheck` covers the runner without configuration.
 
 ---
@@ -32,7 +35,8 @@ and not an accident of scoping. `tools/**/*.mjs` and `tools/**/*.ts` are already
 ## Phase 1: User Story 1 - The playthrough runner (Priority: P1) 🎯 MVP
 
 **Goal**: One command builds the page, opens a real browser on the host display, and an
-agent walks the level to the elevator using only the input events the game already binds.
+agent walks the level to the elevator using only the input events the game already binds,
+answering the guards that engage it on the way.
 
 **Independent Test**: Invoke the command on a host with a display and assert it exits zero
 with `__diag.run.state === 'complete'` and `__diag.player.pointerLocked` true; invoke it
@@ -52,6 +56,8 @@ with no display and assert it refuses by name and exits non-zero.
 - [x] T010 [P] [US1] Append one line to `DECISIONS.md` for each fork this story decides that spec.md left open — how the look sensitivity is calibrated rather than assumed, the bound a leg is given before it is declared stuck, and the radius at which arrival at a tile is accepted. The headed-only, real-input, build-output, two-tier-verdict, retry-budget and single-directory decisions already landed with the spec as `operator` lines; do not restate them (Article VIII).
 - [x] T011 [P] [US1] Add a section to `README.md` beside "Checking it" describing what `npm run play` does, what it writes, and that it requires a display and is deliberately not a gate.
 
+- [x] T012 [US1] Publish each live guard's world position on its `__diag.enemies` record in `src/enemy/world.ts`, additively over 006's FR-011 shape, updating the two tests that assert that record's exact key set (`tests/unit/diag.test.ts`, `tests/unit/enemy-world.test.ts`) and the fixtures in `tests/unit/restart.test.ts`. Then implement `tools/play/combat.mjs` — engage one guard: read its position from `__diag.enemies`, turn the camera to its bearing through the driver's look command, select a weapon holding ammunition through its digit binding if the current one is empty, press and release fire, and confirm the kill by `__diag.combat.kills` rising. Never issue a fire command while `__diag.run.state` is not `playing`. A guard that has engaged the player is answered on the way past rather than walked past: the agent is carrying a loaded pistol, and the routed path passes three guard markers (FR-007, US1-S9, US1-S10, US1-S11).
+
 **Checkpoint**: The level can be watched being beaten. Nothing is recorded and nothing is
 scored yet.
 
@@ -59,8 +65,9 @@ scored yet.
 
 ## Phase 2: User Story 2 - The full-completion objective set (Priority: P1)
 
-**Goal**: The agent clears the level rather than crossing it — every guard, secret,
-treasure and key — with the objective set derived from the level's own tables.
+**Goal**: The agent clears the level rather than crossing it — every guard hunted rather
+than merely survived, every secret, treasure and key — with the objective set derived from
+the level's own tables. The engagement itself is US1's; this story decides what to seek.
 
 **Independent Test**: Complete a run and assert the objective set contains one objective per
 enemy marker, per secret tile and per treasure entry, with no count written into the runner,
@@ -70,14 +77,13 @@ and that each was confirmed against the counter that owns it.
 
 > Write these first and confirm they fail before implementing.
 
-- [ ] T012 [P] [US2] `tests/unit/play-objectives.test.ts`: against the shipped `src/level.ts`, the derived objective set contains exactly one guard objective per `ENEMY_SPAWNS` marker, one secret objective per `S` tile of `LEVEL_GRID`, one treasure objective per `treasure` entry of `ITEM_SPAWNS` and one exit objective; adding a marker to a fixture grid adds exactly one objective; and no count appears as a literal in the module under test (FR-006, US2-S1, US2-S2, SC-004).
-- [ ] T013 [P] [US2] `tests/unit/play-objectives.test.ts` (ordering cases): for every locked entry in `DOOR_LOCKS`, the objective collecting the key that entry names precedes any objective whose route passes through that door; and a health or ammunition objective is inserted when the corresponding declared threshold is crossed (FR-008, FR-009, US2-S7, US2-S9).
+- [ ] T013 [P] [US2] `tests/unit/play-objectives.test.ts`: against the shipped `src/level.ts`, the derived objective set contains exactly one guard objective per `ENEMY_SPAWNS` marker, one secret objective per `S` tile of `LEVEL_GRID`, one treasure objective per `treasure` entry of `ITEM_SPAWNS` and one exit objective; adding a marker to a fixture grid adds exactly one objective; and no count appears as a literal in the module under test (FR-006, US2-S1, US2-S2, SC-004).
+- [ ] T014 [P] [US2] `tests/unit/play-objectives.test.ts` (ordering cases): for every locked entry in `DOOR_LOCKS`, the objective collecting the key that entry names precedes any objective whose route passes through that door; and a health or ammunition objective is inserted when the corresponding declared threshold is crossed (FR-008, FR-009, US2-S7, US2-S9).
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Implement derivation in `tools/play/objectives.mjs` — read the level tables through the module `tools/play/nav-entry.ts` already compiles and emit one objective per guard marker, secret tile, treasure entry and the exit, each carrying its tile and the `__diag` counter that confirms it. Pure: no page, no browser, so T012 tests it directly (FR-006, US2-S1, US2-S2).
-- [ ] T015 [US2] Implement ordering in `tools/play/objectives.mjs` — key objectives ahead of any objective routed through the door their `DOOR_LOCKS` entry names, and the health and ammunition thresholds declared in one place at the top of the file with the pickup objectives they insert (FR-008, FR-009, US2-S7, US2-S9).
-- [ ] T016 [US2] Implement `tools/play/combat.mjs` — engage one guard: read its position from `__diag.enemies`, turn the camera to its bearing through the driver's look command, select a weapon holding ammunition through its digit binding if the current one is empty, press and release fire, and confirm the kill by `__diag.combat.kills` rising. Never issue a fire command while `__diag.run.state` is not `playing` (FR-007, US2-S3, US2-S4, US2-S5).
+- [ ] T015 [US2] Implement derivation in `tools/play/objectives.mjs` — read the level tables through the module `tools/play/nav-entry.ts` already compiles and emit one objective per guard marker, secret tile, treasure entry and the exit, each carrying its tile and the `__diag` counter that confirms it. Pure: no page, no browser, so T013 tests it directly (FR-006, US2-S1, US2-S2).
+- [ ] T016 [US2] Implement ordering in `tools/play/objectives.mjs` — key objectives ahead of any objective routed through the door their `DOOR_LOCKS` entry names, and the health and ammunition thresholds declared in one place at the top of the file with the pickup objectives they insert (FR-008, FR-009, US2-S7, US2-S9).
 - [ ] T017 [US2] Drive the ordered objective set from `tools/play.mjs`: for each objective, walk its leg and then complete it — a guard through `tools/play/combat.mjs`, a secret, key or treasure through the interact command or by standing on the tile, each confirmed against its own counter. A refused interaction records `__diag.interaction.lastReason` and fails the objective by name rather than being retried blindly against the same tile (FR-007, FR-008, US2-S6, US2-S8, Edge Cases).
 
 **Checkpoint**: The agent clears the level. Nothing is recorded and nothing is scored yet.
@@ -158,15 +164,16 @@ what `__diag.run` and `window.__run.lines()` come from.
 
 - `tools/smoke.mjs` — edited by exactly one task, T001 (US1), which removes code rather than
   adding it. No other task in this spec touches the gate.
-- `tools/play.mjs` — created in T007 (US1), extended in T017 (US2), T019 (US3) and T027/T028
-  (US4). It is the one genuinely shared file, which is why every extension to it is the last
+- `tools/play.mjs` — created in T007 (US1), extended in T012 (US1), T017 (US2), T019 (US3)
+  and T027/T028 (US4). It is the one genuinely shared file, which is why every extension to it is the last
   task of its story.
 - `tools/play/driver.mjs` — created in T004 (US1), extended in T005 (US1). No other story
-  edits it; US2's combat consumes it.
+  edits it; `tools/play/combat.mjs` (T012, US1) and US2's objective loop both consume it.
 - `tools/play/navigate.mjs` — created in T003 (US1), extended in T006 (US1).
-- `tools/play/objectives.mjs` — created in T014 (US2), extended in T015 (US2).
+- `tools/play/combat.mjs` — created in T012 (US1). US2 calls it and does not edit it.
+- `tools/play/objectives.mjs` — created in T015 (US2), extended in T016 (US2).
 - `tools/play/verdict.mjs` — created in T024 (US4), extended in T025 and T026 (US4).
-- `tests/unit/play-objectives.test.ts` — written by T012 and extended by T013, both US2.
+- `tests/unit/play-objectives.test.ts` — written by T013 and extended by T014, both US2.
 - `DECISIONS.md` — appended by T010 (US1) only. Append-only by Article VIII.
 - **`src/` — edited by no task in this spec.** See plan.md's Structure Decision: the
   measurements in spec.md's Clarifications exist to justify not adding a seam here.
@@ -174,7 +181,7 @@ what `__diag.run` and `window.__run.lines()` come from.
 ### Parallel Opportunities
 
 Within a story only, on the tasks marked [P]: T002 alongside T001, then T008/T010/T011 once
-T007 lands; T012 and T013 together in US2; T018 alone in US3; T022 and T023 together, then
+T007 lands and T012 after them; T013 and T014 together in US2; T018 alone in US3; T022 and T023 together, then
 T029 in US4. Nothing crosses a story boundary.
 
 ## Notes

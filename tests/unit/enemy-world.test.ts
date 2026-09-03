@@ -63,7 +63,7 @@ describe('the world built from the shipped level', () => {
     expect(entries).toHaveLength(world.records.length);
     expect(world.enemyDiagnostics()).toBe(entries);
     for (const entry of entries) {
-      expect(Object.keys(entry).sort()).toEqual(['pathable', 'state', 'viewAngle']);
+      expect(Object.keys(entry).sort()).toEqual(['pathable', 'state', 'viewAngle', 'x', 'z']);
       expect(entry.state).toBe('idle');
       expect(entry.viewAngle).toBe(0);
       expect(entry.pathable).toBe(true);

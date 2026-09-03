@@ -40,13 +40,19 @@ simplest honest form — a video and a result, from one command.
 ### User Story 1 - The playthrough runner (Priority: P1)
 
 As an operator, I run one command and watch an agent play the game — moving, turning,
-opening doors and riding the elevator — in a real browser window on my own machine,
-through the same input path I would use myself.
+opening doors, shooting back at what shoots at it, and riding the elevator — in a real
+browser window on my own machine, through the same input path I would use myself.
 
 **Why this priority**: Nothing else in this spec exists without a run. It is also the only
 story carrying genuine unknowns, all of them about driving a real browser, and it is the
 story that establishes the spec's defining property: the agent plays the game rather than
 scripting it.
+
+Answering fire belongs here rather than in US2 because it is part of *crossing* the level,
+not part of clearing it. The level ships eight guards along a route that passes three of
+their markers, and the agent starts holding a loaded pistol; an agent that walks past them
+without returning fire is not a minimal foundation but an artificially handicapped one.
+Hunting every guard down is a different thing and stays in US2.
 
 **Independent Test**: Invoke the command on a host with a display and assert the process
 exits zero, a browser window ran, `__diag.player.pointerLocked` was true, and
@@ -79,14 +85,22 @@ it refuses by name rather than running.
 8. **Given** a completed invocation, **When** the repository is inspected, **Then** the
    output directory is excluded from version control, is skipped by the binary-asset
    walker, and `npm run smoke` passes with that directory populated.
+9. **Given** a guard that has engaged the player, **When** the agent answers it, **Then**
+   the camera is turned to that guard's bearing read from the diagnostics roster, the fire
+   command is issued through its real binding, and the kill is confirmed by the kill counter
+   rising.
+10. **Given** the selected weapon holding no ammunition, **When** a guard is answered,
+    **Then** a weapon that has ammunition is selected first, through its real binding.
+11. **Given** a run state that is not `playing`, **When** any fire command would be issued,
+    **Then** none is — the agent does not shoot at a stats screen.
 
 ---
 
 ### User Story 2 - The full-completion objective set (Priority: P1)
 
 As an operator, the run I watch is not a dash for the exit — the agent clears the level:
-every guard killed, every secret pushed, every treasure collected, both keys taken, and
-only then the elevator.
+every guard hunted down and killed rather than merely survived, every secret pushed, every
+treasure collected, both keys taken, and only then the elevator.
 
 **Why this priority**: A run that only reaches the exit exercises movement, doors and the
 elevator. A run that clears the level additionally exercises combat, hitscan, the HUD,
@@ -105,21 +119,17 @@ then assert each was confirmed against the counter that owns it.
    item entries and the single `E` tile — and contains no hardcoded count.
 2. **Given** a level that gains one guard marker, **When** the objective set is built,
    **Then** it contains one more guard objective, with no edit to the runner.
-3. **Given** a guard objective, **When** it is pursued, **Then** the camera is turned to
-   that guard's bearing read from the diagnostics roster, the fire command is issued
-   through its real binding, and completion is confirmed by the kill counter rising.
-4. **Given** a weapon with no ammunition remaining, **When** a guard objective is pursued,
-   **Then** a weapon that has ammunition is selected first, through its real binding.
-5. **Given** a run state that is not `playing`, **When** any fire command would be issued,
-   **Then** none is — the agent does not shoot at a stats screen.
-6. **Given** a secret objective, **When** it is pursued, **Then** the interact command is
+3. **Given** a guard that has never engaged the player, **When** the objective set is
+   worked, **Then** it is still sought out and killed through US1's engagement — clearing
+   the level is not the same as surviving it.
+4. **Given** a secret objective, **When** it is pursued, **Then** the interact command is
    issued at the `S` tile and completion is confirmed by the secrets-found counter rising.
-7. **Given** a locked door on the route, **When** the objective order is built, **Then** the
+5. **Given** a locked door on the route, **When** the objective order is built, **Then** the
    objective collecting the key that door's lock table entry names precedes it.
-8. **Given** a refused interaction, **When** it is observed, **Then** the reason published
+6. **Given** a refused interaction, **When** it is observed, **Then** the reason published
    by the interaction diagnostics is recorded and reported rather than the command being
    retried blindly against the same tile.
-9. **Given** health below its declared threshold or the selected weapon's ammunition below
+7. **Given** health below its declared threshold or the selected weapon's ammunition below
    its own, **When** the next objective is chosen, **Then** the corresponding pickup is
    collected first, each threshold declared in one place.
 
@@ -254,12 +264,18 @@ that reads as a result; and assert the process exit code follows the hard criter
   staged for commit and the smoke gate passes with that directory populated.
 - **FR-006**: The objective set SHALL be derived at run time from the level's own data —
   every enemy marker, every secret tile of the grid, every treasure item entry and the
-  single exit tile — and MUST NOT carry a hardcoded count of any of them.
-- **FR-007**: A guard objective SHALL be completed by turning the camera to that guard's
-  bearing as published in the diagnostics roster, issuing the fire command through its real
-  binding, and confirming the kill against the kill counter; the runner MUST select a
-  weapon holding ammunition before firing and MUST NOT issue a fire command while the run
-  state is not `playing`.
+  single exit tile — and MUST NOT carry a hardcoded count of any of them; a guard that never
+  engages the player is an objective to be sought out through FR-007 all the same.
+- **FR-007**: The diagnostics roster SHALL publish each live guard's world position,
+  additively over the shape 006's FR-011 declared — `viewAngle` is the sprite column, which
+  is a guard's facing relative to the camera and not the direction to it, so nothing already
+  published can be turned into a bearing. A guard SHALL then be engaged by turning the camera
+  to that guard's bearing as published in that roster, issuing the fire command through its real binding,
+  and confirming the kill against the kill counter; the runner MUST select a weapon holding
+  ammunition before firing and MUST NOT issue a fire command while the run state is not
+  `playing`. A guard that has engaged the player MUST be answered rather than walked past:
+  self-defence is part of crossing the level, and an agent that carries a loaded weapon
+  through a firefight without using it is testing less of the game than it is running.
 - **FR-008**: A secret objective SHALL be completed by the interact command at its tile and
   confirmed against the secrets-found counter; an objective that collects the key a locked
   door's lock-table entry names MUST precede any objective routed through that door, and a
@@ -321,7 +337,7 @@ that reads as a result; and assert the process exit code follows the hard criter
 ### Measurable Outcomes
 
 - **SC-001**: One command on a host with a display produces a video of the level being
-  played and completed, and exits zero.
+  played and completed — including guards engaged and killed on the way — and exits zero.
 - **SC-002**: The same command on a host with no display refuses by name and exits
   non-zero, having written nothing.
 - **SC-003**: Across a passing run, `window.__playerDrive` is never called and no new input
@@ -354,9 +370,11 @@ that reads as a result; and assert the process exit code follows the hard criter
 - The recording's frame rate is the browser's screencast rate, not the game's frame rate;
   the frame rate the record reports is the one the game measured, and the two are not the
   same number.
-- The agent's *perception* is the diagnostics surface — guard bearings, health, ammunition,
-  counters. Only its *input* is constrained to be real. Reading rendered pixels to aim
-  would be purer and is out of scope.
+- The agent's *perception* is the diagnostics surface — guard positions, health, ammunition,
+  counters — and only its *input* is constrained to be real. That distinction is what admits
+  FR-007's one additive field under `src/`: publishing a fact a harness can read is the
+  extension Constitution III asks for, while a second way to *move* the player is the thing
+  this spec refuses to add. Reading rendered pixels to aim would be purer and is out of scope.
 - Guard behaviour against a live player is not reproducible run to run: guards react to
   timing this spec does not control. That is why attempts exist and why the attempt count
   is reported rather than hidden.
@@ -368,10 +386,10 @@ that reads as a result; and assert the process exit code follows the hard criter
 ```yaml
 US1:
   depends_on: []
-  implements: [FR-001, FR-002, FR-003, FR-004, FR-005]
+  implements: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-007]
 US2:
   depends_on: [US1]
-  implements: [FR-006, FR-007, FR-008, FR-009]
+  implements: [FR-006, FR-008, FR-009]
 US3:
   depends_on: [US1]
   implements: [FR-010, FR-011, FR-012]

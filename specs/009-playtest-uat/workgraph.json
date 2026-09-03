@@ -15,7 +15,8 @@
         "FR-002",
         "FR-003",
         "FR-004",
-        "FR-005"
+        "FR-005",
+        "FR-007"
       ],
       "depends_on": [],
       "depends_on_merged": [],
@@ -29,7 +30,6 @@
       "requirement_keys": [
         "US2",
         "FR-006",
-        "FR-007",
         "FR-008",
         "FR-009"
       ],

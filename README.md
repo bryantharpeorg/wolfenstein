@@ -59,6 +59,11 @@ and `look.ts` against a real browser rather than an injected event source. Where
 comes from the game's own A\*, compiled out of `src/enemy/pathing.ts`, so the agent and the
 guards route with one pathfinder.
 
+It takes over the mouse while it runs — pointer lock is real, so moving your own mouse
+fights the agent's and will end the attempt. That is classified as a harness fault rather
+than a game failure, and is one of the things the retry budget exists for; still, leave the
+machine alone for the half-minute it takes.
+
 It needs a display and refuses to run without one: the artifact is a video, and headless
 Chromium rasterizes this game in software at a fraction of the frame rate. That also means
 it is deliberately **not** a gate — it is absent from `ergane.yaml` and can never be a

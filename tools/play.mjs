@@ -107,6 +107,7 @@ async function playOnce(browser, url, attemptDir) {
 
     const walk = await walkToTile(page, look, nav, exit, {
       onWaypoint: (cell) => say(`    reached (${cell.x},${cell.z})`),
+      onKill: (killed) => say(`    answered a guard (${killed} down)`),
     });
     if (!walk.arrived) {
       outcome.reason = walk.reason;
@@ -124,6 +125,9 @@ async function playOnce(browser, url, attemptDir) {
       player: { x: window.__diag.player.x, z: window.__diag.player.z },
       fps: window.__diag.fps,
       renderer: window.__diag.renderer,
+      // The margin the run finished with: the difference between "completed" and "very
+      // nearly did not" is the whole reason US4 keeps attempts and reports them.
+      health: window.__diag.combat.health,
       errors: [...window.__diag.errors],
       lines: window.__run?.lines?.() ?? null,
     }));
@@ -213,8 +217,8 @@ async function main() {
   await rename(STAGING_DIR, OUTPUT_DIR);
 
   if (passed) {
-    const { run: finished, fps } = outcome.final;
-    say(`PASS — the level was completed in ${(finished.elapsedMs / 1000).toFixed(1)}s at ${fps.toFixed(1)} fps`);
+    const { run: finished, fps, health } = outcome.final;
+    say(`PASS — the level was completed in ${(finished.elapsedMs / 1000).toFixed(1)}s at ${fps.toFixed(1)} fps, finishing on ${Math.round(health)} health`);
     say(`  kills ${finished.kills}/${finished.guardsTotal}  secrets ${finished.secretsFound}/${finished.secretsTotal}  treasure ${finished.treasureFound}/${finished.treasureTotal}  rating ${finished.rating}`);
   } else {
     console.error(`FAIL — ${outcome.fault ?? outcome.reason ?? 'the run did not complete'}`);

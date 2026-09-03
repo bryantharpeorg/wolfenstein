@@ -72,8 +72,8 @@ describe('the enemy diagnostics fields (FR-011)', () => {
     expect(diag.enemies).toEqual([]);
     expect(diag.enemiesAlive).toBe(0);
     expect(diag.enemySpawnErrors).toEqual([]);
-    diag.enemies = [{ state: 'chase', viewAngle: 3, pathable: false }];
-    expect(Object.keys(diag.enemies[0]!).sort()).toEqual(['pathable', 'state', 'viewAngle']);
+    diag.enemies = [{ state: 'chase', viewAngle: 3, pathable: false, x: 4.5, z: 9.5 }];
+    expect(Object.keys(diag.enemies[0]!).sort()).toEqual(['pathable', 'state', 'viewAngle', 'x', 'z']);
   });
 
   it('renames, removes and repurposes nothing an earlier spec owns', () => {

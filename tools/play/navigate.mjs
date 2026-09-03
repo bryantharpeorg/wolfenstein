@@ -21,6 +21,7 @@ import {
   HarnessFault, frames, readPlayer, until, yawToward, interact,
   holdKey, releaseKey, wrapAngle,
 } from './driver.mjs';
+import { answerThreats, readCombat, threats } from './combat.mjs';
 
 /** How near a waypoint's centre counts as arrival. The collider's radius is 0.3 and a tile
  *  is 1 wide, so this is "standing on the tile" without demanding the exact centre. */
@@ -114,6 +115,29 @@ export function routeBetween(nav, from, to) {
   return nav.isUnreachable(result) ? null : result.cells;
 }
 
+/**
+ * Answers anything shooting at the agent right here, stopping to do it (FR-007).
+ *
+ * The movement keys are released first and restored after, because this module is the one
+ * holding them and because a player stops to shoot. Cheap when there is nothing to answer:
+ * one read of the roster, and no key touched unless a threat is actually in view.
+ */
+async function defendHere(page, look, nav) {
+  const state = await readCombat(page);
+  if (state.dead || state.runState !== 'playing') return 0;
+  const player = await readPlayer(page);
+  if (threats(state.enemies, player, nav.LEVEL_GRID).length === 0) return 0;
+
+  await releaseKey(page, 'KeyW');
+  await releaseKey(page, 'ShiftLeft');
+  try {
+    return await answerThreats(page, look, nav.LEVEL_GRID);
+  } finally {
+    await holdKey(page, 'ShiftLeft');
+    await holdKey(page, 'KeyW');
+  }
+}
+
 /** Asks the tile ahead to open and waits for the travel. Returns what the game said. */
 async function openAhead(page) {
   const before = await page.evaluate(() => window.__diag.interaction.doorsOpen);
@@ -133,7 +157,7 @@ async function openAhead(page) {
  * a secret asks it to open and carries on; one that stops advancing anywhere else has found
  * geometry, and says where.
  */
-export async function walkTo(page, look, nav, point, { openWhenStuck = true } = {}) {
+export async function walkTo(page, look, nav, point, { openWhenStuck = true, defend = true, onKill } = {}) {
   await look.turnTo(yawToward(point.x - (await readPlayer(page)).x, point.z - (await readPlayer(page)).z));
 
   let stalls = 0;
@@ -157,6 +181,16 @@ export async function walkTo(page, look, nav, point, { openWhenStuck = true } = 
           reason: `the player was killed at (${player.x.toFixed(2)}, ${player.z.toFixed(2)})`,
         };
       }
+      if (defend) {
+        const killed = await defendHere(page, look, nav);
+        if (killed > 0) {
+          onKill?.(killed);
+          // A firefight is not a stall, and the aim it left is not the heading.
+          stalls = 0;
+          previousDistance = Infinity;
+        }
+      }
+
       const dx = point.x - player.x;
       const dz = point.z - player.z;
       const distance = Math.hypot(dx, dz);
@@ -207,7 +241,7 @@ export async function walkTo(page, look, nav, point, { openWhenStuck = true } = 
  * Walks from wherever the player is to a target tile, routing with the game's own pathfinder
  * and walking the corners of what it returns. Returns `{ arrived, reason }`.
  */
-export async function walkToTile(page, look, nav, target, { onWaypoint } = {}) {
+export async function walkToTile(page, look, nav, target, { onWaypoint, onKill, defend = true } = {}) {
   const start = tileOf(await readPlayer(page));
   const cells = routeBetween(nav, start, target);
   if (cells == null) {
@@ -217,7 +251,7 @@ export async function walkToTile(page, look, nav, target, { onWaypoint } = {}) {
     };
   }
   for (const cell of corners(cells)) {
-    const result = await walkTo(page, look, nav, centreOf(cell));
+    const result = await walkTo(page, look, nav, centreOf(cell), { defend, onKill });
     if (!result.arrived) {
       return { arrived: false, reason: `leg to (${cell.x},${cell.z}): ${result.reason}` };
     }

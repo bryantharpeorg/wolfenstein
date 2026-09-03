@@ -27,11 +27,19 @@ game is broken* from *the run went badly*. That distinction is the two-tier verd
 is what keeps the command worth running — a UAT that fails on the hardest optional
 objective is a UAT nobody runs twice.
 
-The spec is deliberately confined to `tools/`. Nothing under `src/` changes: measurements
-taken on the built page on 2026-09-02 (recorded in spec.md's Clarifications) established
-that real key events drive locomotion, that a real click on the canvas is granted pointer
-lock, and that synthesized mouse movement under that lock turns the camera. The seam this
-spec would otherwise have needed does not need to exist.
+The spec is confined to `tools/` but for one additive field. No *input* seam is added:
+measurements taken on the built page on 2026-09-02 (recorded in spec.md's Clarifications)
+established that real key events drive locomotion, that a real click on the canvas is
+granted pointer lock, and that synthesized mouse movement under that lock turns the camera,
+so the `window.__playerLook` this spec would otherwise have needed does not need to exist.
+
+What `src/` does gain is one *read-only* fact: FR-007 has `src/enemy/world.ts` publish each
+guard's position in the diagnostics roster. That is the opposite kind of change from a seam
+— Constitution III asks a story to "extend that harness's assertion surface when it needs a
+runtime fact it cannot yet report", and this is exactly that: `viewAngle` is a sprite column,
+a facing relative to the camera rather than a direction to the guard, so nothing already
+published could be turned into a bearing and an agent aiming with a mouse has to aim at
+something. Perception is extended; input is not.
 
 ## Technical Context
 
@@ -76,7 +84,8 @@ after the fact, so this runner is born split across six files. The command must 
 become a way around `npm run smoke` (Constitution III): it is absent from `ergane.yaml`,
 asserts nothing the gate asserts, and cannot run where the gate runs.
 
-**Scale/Scope**: Four stories. US1 is the foundation and the only one with real unknowns;
+**Scale/Scope**: Four stories. US1 crosses the level and defends itself doing it; US2 turns
+crossing into clearing. US1 is the foundation and the only one with real unknowns;
 US2 and US3 are independent of each other and both depend only on US1; US4 reports on all
 three. Sixteen functional requirements, each implemented by exactly one story.
 
@@ -90,7 +99,7 @@ three. Sixteen functional requirements, each implemented by exactly one story.
 | II. Zero binary assets | The spec produces video, which is exactly what this article guards against — so the output directory is gitignored *and* skipped by the binary-asset walker, and `.webm`/`.mp4` are added to `.gitignore` so a recording can never be staged even by hand. The walker's forbidden-extension list is deliberately **not** extended, because that would fail the smoke gate on the runner's own output. FR-005 makes "smoke passes with the directory populated" an acceptance criterion. | PASS, with the reading recorded in `DECISIONS.md` |
 | III. Test-first, smoke-tested always | Objective derivation, objective ordering, verdict computation, timeline arithmetic and report rendering are DOM-free and get failing tests first. The browser half is verified by the artifact it produces. Crucially this command **weakens no gate**: it is not in `ergane.yaml`, it is not a required check, and it asserts nothing `npm run smoke` asserts. | PASS |
 | IV. File size ceiling (400) | Six files under `tools/play/` plus the entry, each with one job — args and orchestration, input driving, navigation, combat, recording and record assembly. None approaches the ceiling. | PASS |
-| V. Prefer editing to authoring | The static server and browser resolution already exist inside `tools/smoke.mjs` and are extracted to a shared module rather than copied, so both harnesses resolve a browser the same way. The pathfinder is the game's own, compiled rather than reimplemented. What genuinely is new — driving real input, recording, record assembly — has no existing home. | PASS |
+| V. Prefer editing to authoring | The static server and browser resolution already exist inside `tools/smoke.mjs` and are extracted to a shared module rather than copied, so both harnesses resolve a browser the same way. The pathfinder is the game's own, compiled rather than reimplemented. FR-007's guard position is two fields added to a record that already exists, not a new diagnostics slice. What genuinely is new — driving real input, recording, record assembly — has no existing home. | PASS |
 | VI. Original work only | Tooling. No game content of any kind. | PASS |
 | VII. Every task ends green and committed | All four gates exist. Every task ends with `npm run typecheck`, `npm run build`, `npm run test` and `npm run smoke` green — the last of these run **with the output directory populated**, which is how FR-005's exclusion is proved rather than assumed. | PASS |
 | VIII. Design forks decided, not asked | Headed-only, real-input-only, the retry budget, the two-tier verdict and the single replaced output directory are each a decided fork with a line in `DECISIONS.md`. | PASS |
