@@ -324,22 +324,41 @@ US1:
   depends_on: []
   implements: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-006]
 US2:
-  depends_on: [US1]
+  depends_on: []
+  depends_on_merged: [US1]
   implements: [FR-007, FR-008, FR-009, FR-010]
 US3:
-  depends_on: [US2]
+  depends_on: []
   depends_on_merged: [US1]
+  concurrent_with: [US2]
   implements: [FR-011, FR-012, FR-013]
 US4:
-  depends_on: [US3]
-  depends_on_merged: [US2]
+  depends_on: []
+  depends_on_merged: [US2, US3]
   implements: [FR-014, FR-015, FR-016, FR-017]
 ```
 
-`depends_on` alone would leave the two `depends_on_merged` edges to be *inferred* from the
-file overlap in tasks.md — the deriver spots that US3 and US1 both write
-`src/systems/crosshair/register.ts` and adds the edge itself, because it does not compute
-the transitive closure of `depends_on`. Declared here instead, so the ordering survives an
-edit to tasks.md that changes which files a story's slice names. They are not redundant with
-`depends_on`: that orders *dispatch*, while these wait for the earlier story to actually
-**land**, which is what a story amending an unmerged story's file needs.
+A diamond, not a chain: `US1 → { US2 ∥ US3 } → US4`. US2 owns the gap and US3 owns the
+marks, and their task slices are disjoint but for one file — `src/systems/crosshair/register.ts`,
+which every story here extends. Left undeclared, the deriver reads that one overlap and
+infers a merge edge from US3 to US2, serialising them; `concurrent_with: [US2]` is the
+declaration that says run them together anyway. Two nodes is also exactly the engine's slot
+count, so this is the widest the graph can usefully be.
+
+What makes the shared file safe is not optimism, it is the queue: each node builds in its
+own worktree and the queue lands **one branch at a time, rebased, with the gates rerun**, so
+a genuine conflict fails a merge rather than corrupting a tree. T014 and T018 are written to
+keep that merge clean — each adds its own step call rather than editing the other's lines.
+
+**Every edge here is a merge edge, and `depends_on` is empty throughout.** That is not an
+omission: the deriver refuses an id listed in both lists — "an edge gates on either
+verification or merge, never both" — so each dependency is one kind or the other, and every
+dependency in this spec is the merge kind. A pass edge promises only that a verdict exists;
+it says nothing about the tree. But US2 and US3 both extend `src/systems/crosshair/register.ts`,
+which US1 *creates*, and US4 extends it again after both have changed it — so what each
+story needs from its predecessors is their code, not their verdict. Gating these on
+verification would release a node against a base missing the module it imports.
+
+Declaring them also keeps the ordering stable: left off, the deriver infers edges from the
+file overlap in tasks.md, and the graph would then change shape whenever a task's file list
+changed.

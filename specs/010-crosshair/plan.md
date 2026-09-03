@@ -67,9 +67,10 @@ approaches it. Draw calls under 20 (`002`, preserved by `005`, `007` and `008`) 
 spends the budget's next unit and FR-006 makes that an acceptance criterion rather than an
 assumption.
 
-**Scale/Scope**: Four stories in a strict chain — each amends the module and the system the
-one before it created, which is the shape the engine is fastest at. Seventeen functional
-requirements, each implemented by exactly one story.
+**Scale/Scope**: Four stories as a diamond — US1 founds, US2 and US3 run concurrently on
+disjoint concerns, US4 reports on both. Every story amends a module an earlier one created
+rather than authoring a new subsystem, which is the shape the engine is fastest at.
+Seventeen functional requirements, each implemented by exactly one story.
 
 ## Constitution Check
 
@@ -176,6 +177,6 @@ rather than reaching into either, and keeps the key resolvable in a test with no
 | Deviation | Why it is necessary | Simpler alternative rejected because |
 |---|---|---|
 | A second screen-space quad, spending a draw call against a 20-call budget | The reticle must stay centred with constant-pixel arms and must update every frame; `007`'s HUD quad is bottom-pinned, viewport-spanning, and deliberately skips recompositing when its signature is unchanged. | Compositing the reticle onto the HUD canvas would stretch it with the bar and would force a full 1280×160 recomposite every frame, trading one draw call for continuous canvas work — a worse deal on the axis `005` established matters. |
-| Five modules for what could be one file | Constitution IV's ceiling, and the story chain: each of US2, US3 and US4 needs its own testable surface, and a single module would be edited by all four stories in sequence with the contention that implies. | One `crosshair.ts` holding geometry, spread, feedback and bindings would approach the ceiling and would make every story after US1 a merge conflict with the one before it. |
+| Five modules for what could be one file | Constitution IV's ceiling, and concurrency: US2 and US3 dispatch together, so they need surfaces they can each own outright. `crosshair-spread.ts` and `crosshair-feedback.ts` are exactly that split, which is what leaves `register.ts` as their only contended file. | One `crosshair.ts` holding geometry, spread, feedback and bindings would approach the ceiling and would force US2 and US3 to serialise — the parallelism this graph is shaped to get would be given away by the file layout. |
 | A tuning-constants module for values that could be inline | Eight of this spec's numbers are pure taste — arm length, colour, recoil amount, decay times — and taste gets retuned. `005` already paid for this lesson with its lighting rig. | Inlining them puts a retune in three files and makes "what does this reticle actually do" a search rather than a read. |
 | Adding to `009`'s runner while `009` itself is unfinished | The operator asked for the playthrough as a verification surface, and the runner's US1 — on `main` since PR #52 — already drives real input, which is all FR-017 needs. | Waiting for `009` US2–US4 would block this spec on an epic it does not depend on. Depending on US1 alone costs nothing: it is landed, and T023 adds a call to it rather than restructuring it. If `009` US2–US4 land first, `tools/play.mjs` will have moved and T023 must adapt to it rather than the reverse. |

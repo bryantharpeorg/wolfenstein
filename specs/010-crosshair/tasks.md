@@ -236,11 +236,23 @@ three crosshair observations in its record.
 
 ### Story completion order
 
-`US1 → US2 → US3 → US4`, exactly as spec.md's `## Work Graph` declares. This is a strict
-chain rather than a fan-out: every story after US1 amends `src/systems/crosshair/register.ts`,
-so concurrent dispatch would put two nodes in the same file. That is a deliberate trade —
-the chain is slower than `009`'s diamond but it is the shape the engine is fastest at, since
-each story edits a module the previous one created rather than authoring a new one.
+`US1 → { US2 ∥ US3 } → US4`, exactly as spec.md's `## Work Graph` declares. US1 is the
+foundation and carries the only real unknown — the quad, the render order and the draw-call
+budget. US2 and US3 then run **concurrently**: US2 owns the gap, US3 owns the marks, and
+their slices are disjoint apart from `src/systems/crosshair/register.ts`. US4 reports on
+both.
+
+Two nodes is the whole of the available parallelism and also the whole of the engine's
+capacity — `ergane.yaml` caps `roadmap.max_concurrent_nodes` at 2 for the slot count — so
+this graph saturates the floor without ever exceeding it.
+
+**The one shared file is handled, not ignored.** T014 (US2) and T018 (US3) both extend
+`register.ts`. Each adds its own step call rather than editing the other's lines, so the
+rebase the queue performs is a clean three-way merge rather than a conflict. The safety net
+underneath that is the queue itself: nodes build in isolated worktrees and land **one branch
+at a time, rebased, with every gate rerun**, so a genuine collision fails a merge instead of
+corrupting the tree. `concurrent_with: [US2]` on US3 is the declaration that opts into this;
+without it the deriver reads the overlap and serialises the two.
 
 ### Cross-spec prerequisites
 
@@ -257,9 +269,11 @@ this spec can therefore be dispatched in order with no cross-spec wait.
 ### Shared files (genuine contention, handled by the ordering above)
 
 - `src/systems/crosshair/register.ts` — created in T005 (US1), extended in T006 (US1), T014
-  (US2), T018 (US3) and T021 (US4). It is the one genuinely shared file, which is why every
-  extension to it is the last implementation task of its story and why the stories are a
-  chain rather than a fan-out.
+  (US2), T018 (US3) and T021 (US4). The one genuinely shared file, and the only reason US2
+  and US3 need `concurrent_with` declared at all. Every extension to it is the **last**
+  implementation task of its story, so a concurrent sibling's version of the file is as
+  settled as it will get before the other touches it; and each extension adds its own step
+  call rather than rewriting the frame loop, so the two land as separate hunks.
 - `src/hud/crosshair.ts` — created in T002 (US1), extended in T017 (US3) for the marks.
 - `src/hud/crosshair-spread.ts` — created in T012 (US2), extended in T013 (US2).
 - `tools/smoke-checks/crosshair.mjs` — created in T007 (US1), completed in T022 (US4).
@@ -274,10 +288,12 @@ this spec can therefore be dispatched in order with no cross-spec wait.
 
 ### Parallel Opportunities
 
-Within a story only, on the tasks marked [P]: T001 before T002 in US1, then T008 and T009
+**Across stories**: US2 and US3 run as two concurrent nodes once US1 has merged — the full
+width `ergane.yaml` permits, and the full width this graph has.
+
+**Within a story**, on the tasks marked [P]: T001 before T002 in US1, then T008 and T009
 alongside each other once T007 lands; T010 and T011 together in US2; T015 alone in US3; T019
-and T024 in US4. Nothing crosses a story boundary, because every story ends in the same
-file.
+and T024 in US4.
 
 ## Notes
 
