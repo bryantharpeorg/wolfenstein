@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
-  crosshairStrokes, type CrosshairStroke,
+  CROSSHAIR_STROKE_BUFFER_SIZE, CROSSHAIR_STROKE_COUNT, crosshairStrokes,
+  fillCrosshairStrokes, type CrosshairStroke,
 } from '../../src/hud/crosshair';
 import {
   CROSSHAIR_DIAGNOSTIC_FIELDS, createCrosshairDiagnostics, ensureCrosshairDiag,
@@ -170,6 +171,49 @@ describe('degenerate inputs still answer with finite coordinates (Edge Cases)', 
     expect(finitePoints(strokesAt(GAP_PX, Number.POSITIVE_INFINITY, VIEWPORT_HEIGHT_PX))).toBe(true);
     expect(finitePoints(strokesAt(GAP_PX, ARM_PX, Number.NaN))).toBe(true);
     expect(finitePoints(strokesAt(Number.NaN, ARM_PX, 0))).toBe(true);
+  });
+});
+
+// T006 (FR-006, plan.md Performance Goals). Order 92 recomputes the stroke set
+// every frame, and 005 established per-frame derivation as the cost that
+// matters on this project — so the render edge fills a buffer it owns rather
+// than allocating. These are the semantics that make that safe: filling writes
+// the same values the allocating form returns, in place, and a buffer reused
+// across calls carries nothing over.
+describe('filling a reused stroke buffer (T006)', () => {
+  const input = { gapPx: GAP_PX, armLengthPx: ARM_PX, viewport: { heightPx: VIEWPORT_HEIGHT_PX } };
+
+  it('writes exactly the stroke set the allocating form returns, into the caller\'s buffer', () => {
+    const buffer = new Float64Array(CROSSHAIR_STROKE_BUFFER_SIZE).fill(-7);
+    const count = fillCrosshairStrokes(input, buffer);
+    expect(count).toBe(CROSSHAIR_STROKE_COUNT);
+    const allocated = crosshairStrokes(input);
+    for (let index = 0; index < count; index += 1) {
+      const stroke = allocated[index]!;
+      const base = index * 4;
+      expect([buffer[base], buffer[base + 1], buffer[base + 2], buffer[base + 3]]).toEqual([
+        stroke.x1, stroke.y1, stroke.x2, stroke.y2,
+      ]);
+    }
+    // Nothing outside the stroke set was touched.
+    expect([...buffer].slice(count * 4).every((value) => value === -7)).toBe(true);
+  });
+
+  it('carries nothing over between fills of the same buffer', () => {
+    const buffer = new Float64Array(CROSSHAIR_STROKE_BUFFER_SIZE);
+    fillCrosshairStrokes({ ...input, gapPx: GAP_PX }, buffer);
+    const narrow = [...buffer];
+    fillCrosshairStrokes({ ...input, gapPx: GAP_PX + ARM_PX }, buffer);
+    const wide = [...buffer];
+    expect(wide).not.toEqual(narrow);
+    // And re-filling the original answer reproduces it exactly: no hidden state.
+    fillCrosshairStrokes({ ...input, gapPx: GAP_PX }, buffer);
+    expect([...buffer]).toEqual(narrow);
+  });
+
+  it('honours a buffer smaller than the full set rather than writing past its end', () => {
+    const short = new Float64Array(4);
+    expect(fillCrosshairStrokes(input, short)).toBe(1);
   });
 });
 
