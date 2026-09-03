@@ -43,8 +43,8 @@ function spawnDiag(): Diagnostics {
   interaction.secretsTotal = 2;
 
   diag.enemies = [
-    { state: 'idle', viewAngle: 0, pathable: true },
-    { state: 'idle', viewAngle: 0, pathable: true },
+    { state: 'idle', viewAngle: 0, pathable: true, x: 5.5, z: 5.5 },
+    { state: 'idle', viewAngle: 0, pathable: true, x: 5.5, z: 5.5 },
   ];
   diag.enemiesAlive = 2;
   return diag;
@@ -76,8 +76,8 @@ function playOut(diag: Diagnostics): void {
   interaction.keys = { silver: 1, gold: 1 };
 
   diag.enemies = [
-    { state: 'death', viewAngle: 2, pathable: true },
-    { state: 'chase', viewAngle: 1, pathable: false },
+    { state: 'death', viewAngle: 2, pathable: true, x: 5.5, z: 5.5 },
+    { state: 'chase', viewAngle: 1, pathable: false, x: 35.5, z: 5.5 },
   ];
   diag.enemiesAlive = 1;
 }

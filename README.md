@@ -46,6 +46,30 @@ npm run test        # vitest — pure logic: grid, collision, pathing, doors, te
 npm run smoke       # headless Chromium: loads the game, asserts it actually renders
 ```
 
+### Playing it, automatically
+
+```bash
+npm run play        # headed Chromium on your display; writes playtest/
+```
+
+An agent plays the level and records it. It drives the game through the *same* input a
+person uses — a real click for pointer lock, WASD and Shift, the mouse to look, Space to
+open doors — so unlike every other check here it exercises `keyboard.ts`, `pointer-lock.ts`
+and `look.ts` against a real browser rather than an injected event source. Where to walk
+comes from the game's own A\*, compiled out of `src/enemy/pathing.ts`, so the agent and the
+guards route with one pathfinder.
+
+It takes over the mouse while it runs — pointer lock is real, so moving your own mouse
+fights the agent's and will end the attempt. That is classified as a harness fault rather
+than a game failure, and is one of the things the retry budget exists for; still, leave the
+machine alone for the half-minute it takes.
+
+It needs a display and refuses to run without one: the artifact is a video, and headless
+Chromium rasterizes this game in software at a fraction of the frame rate. That also means
+it is deliberately **not** a gate — it is absent from `ergane.yaml` and can never be a
+required check. The recordings under `playtest/` are build output in the sense `dist/` is:
+gitignored, and skipped by the binary-asset walker.
+
 `npm run smoke` is the gate that matters. A browser game can compile perfectly and
 show a black screen, so the harness loads the built page headlessly, fails on any
 console error or uncaught exception, and reads `window.__diag` to confirm frames are

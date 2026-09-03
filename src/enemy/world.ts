@@ -56,6 +56,12 @@ export interface EnemyDiagnosticsRecord {
   state: GuardState;
   viewAngle: number;
   pathable: boolean;
+  /** The guard's live world position (009 FR-007). Additive over 006's FR-011 shape.
+   *  A harness can read a guard's state but could not, until this, work out where it was —
+   *  and an agent that plays the game with a mouse has to aim at something. `viewAngle` is
+   *  the sprite column, which is a facing and not a bearing, so it cannot stand in. */
+  x: number;
+  z: number;
 }
 
 /** What one call to `tickWorld` did. `ticks` is never more than the cap. */
@@ -143,6 +149,8 @@ export function createEnemyWorld(options: EnemyWorldOptions = {}): EnemyWorld {
     state: record.state,
     viewAngle: record.viewAngle,
     pathable: record.pathable,
+    x: record.guard.x,
+    z: record.guard.z,
   }));
 
   const pendingDamage = new Map<string, number>();
@@ -200,6 +208,8 @@ export function createEnemyWorld(options: EnemyWorldOptions = {}): EnemyWorld {
       const entry = diagnostics[index]!;
       entry.state = record.state;
       entry.pathable = record.pathable;
+      entry.x = record.guard.x;
+      entry.z = record.guard.z;
     });
 
     return damageToPlayer;

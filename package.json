@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "smoke": "node tools/smoke.mjs"
+    "smoke": "node tools/smoke.mjs",
+    "play": "node tools/play.mjs"
   },
   "dependencies": {
     "three": "^0.167.1"
@@ -16,6 +17,7 @@
   "devDependencies": {
     "@types/node": "^22.15.3",
     "@types/three": "^0.167.2",
+    "esbuild": "^0.21.5",
     "playwright": "^1.46.1",
     "typescript": "^5.5.4",
     "vite": "^5.4.2",
