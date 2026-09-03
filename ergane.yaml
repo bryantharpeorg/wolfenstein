@@ -5,7 +5,10 @@
 # Renamed factory.yaml -> ergane.yaml 2026-08-29: 0.5.0 prefers the new name and
 # `resolve_manifest_path` lets ergane.yaml shadow a legacy factory.yaml silently.
 
-version: 1
+# Schema v2 since 2026-09-03, and the bump has exactly one purpose: `ladder:` is a
+# v2-only key, and v1 refuses it as unknown rather than ignoring it. Everything else
+# in this file is a v1 key that v2 still recognises, so nothing below changed meaning.
+version: 2
 
 runtime: bwrap
 
@@ -39,3 +42,63 @@ standards: .specify/memory/constitution.md
 
 # The branch the factory lands on. Declared by the operator, never by a node.
 landing_branch: main
+
+# The retry ladder. Every dial here is a platform default EXCEPT `promotion_persona`,
+# which is the whole reason this block exists. Rung order is fixed in code
+# (factory/verify/ladder.py:206-216), not by the order of these keys:
+#
+#     implementer x3  ->  promoter x1  ->  debugger x1  ->  escalate to the operator
+#     glm-5.3-flash       glm-5.3          claude-opus-5
+#     321B, metered       753B, metered    subscription
+#
+# THREE DIFFERENT WEIGHTS, each stronger than the last. That is the property worth
+# protecting here: a promotion onto the model that just failed is "a retry wearing a hat",
+# in personas.yaml's own words, and a ladder whose rungs differ only by persona has to
+# argue its way out of that. This one does not have to.
+#
+# `promotion_persona` names a ROLE, never a model: constitution VII keeps model names in
+# ~/.config/ergane/personas.yaml alone, so this file says `promoter` and learns nothing
+# about GLM. The models above are a comment, and a comment can go stale -- personas.yaml
+# is the truth. Naming the persona here is what makes the rung exist at all: `promoter`
+# has been defined since 2026-08-28 and had never once fired, because no manifest on this
+# floor had ever named it and `_promotion_available()` returns False when
+# `promotion_persona` is None. Defining a persona does not create a rung; this line does.
+#
+# The rung fires only after the ordinary budget is spent, and a promoted attempt does not
+# consume that budget (`_attempts_spent` excludes it). That ordering is what keeps the cost
+# defensible: rung 2 meters at roughly 9x rung 1 per input token, so it has to stay the
+# exception path. `promotion_cycles` is the dial that would make it the bill.
+#
+# `max_attempts: 3` is unchanged and deliberate: rung 1 is now fast and cheap rather than
+# slow and free, which is an argument for more swings, but every cycle-time measurement
+# recorded in specs/README.md was taken at 3 and changing both the model and the budget
+# in one move would leave neither attributable.
+#
+# The two dials NOT declared here are defaults on purpose. `max_judge_retries` (2) stays
+# bounded INSIDE `max_attempts`, so the judge can never spend budget the operator did not
+# grant it. `escalation_timeout_s` (3600) is how long an escalation waits on a human
+# before the store writes EXPIRED, which ends the node -- shorten it only if someone is
+# actually watching Telegram.
+ladder:
+  max_attempts: 3
+  promotion_persona: promoter
+  promotion_cycles: 1
+  debugger_cycles: 1
+
+# How wide the floor may run. `max_concurrent_nodes: 2` is not a preference, it is the
+# engine's slot count: two concurrent attempts is the ceiling, and a third caller queues
+# with time-to-first-token collapsing (measured: 4th caller ~52s TTFT against ~17s alone,
+# recorded in specs/README.md). Dispatching wider than the engine is wide does not make
+# the epic faster, it makes every node slower and hides the cause.
+#
+# This is a CEILING, not a target. A spec's Work Graph decides how much parallelism there
+# is to have; this decides how much of it may run at once. 010-crosshair declares US2 and
+# US3 `concurrent_with` each other, which is exactly two -- so that graph can saturate the
+# floor without ever exceeding it.
+#
+# `max_concurrent_epics: 1` keeps that budget inside one epic. Two epics at one node each
+# would satisfy the node cap while making the cross-spec ordering the operator owns
+# ("do not dispatch N+1 before N has landed", specs/README.md) impossible to hold.
+roadmap:
+  max_concurrent_nodes: 2
+  max_concurrent_epics: 1
