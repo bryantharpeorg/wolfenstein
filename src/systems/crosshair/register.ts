@@ -36,6 +36,9 @@ import {
 } from '../../hud/crosshair-spread';
 import { DELTA_CLAMP_MS } from '../../player/params';
 import { ensureCrosshairDiag, type CrosshairDiagnostics } from '../../hud/crosshair-diag';
+import {
+  crosshairCommandForEvent, toggleCrosshairHidden,
+} from '../../hud/crosshair-bindings';
 
 const DEGREES_TO_RADIANS = Math.PI / 180;
 /** Distance from the camera the reticle's quad sits at: the HUD's own, so the
@@ -51,6 +54,11 @@ let diag: CrosshairDiagnostics | null = null;
 let spread: CrosshairSpreadState | null = null;
 let texture: CanvasTexture | null = null;
 let quad: Mesh | null = null;
+/** The display preference US4 toggles (FR-014). Deliberately not a
+ *  `registerResettable` and deliberately not touched by `resetCrosshairRun`: a
+ *  display preference is not run state, and `007`'s restart must leave it as
+ *  the player left it (US4-S4). */
+let hidden = false;
 /** The 2D drawing surface the strokes are recomputed into. Created here, not in
  *  `src/hud/`, because this is the file that touches the DOM. */
 let surface: HTMLCanvasElement | null = null;
@@ -211,6 +219,18 @@ function resetCrosshairRun(): void {
   if (diag != null) diag.mark = 'none';
 }
 
+/** The toggle (US4, FR-014): the command comes from the one binding table in
+ *  `src/hud/crosshair-bindings.ts` — this file maps no key code itself
+ *  (US4-S5). A held key repeats, and `008` already established that a repeat is
+ *  not a press, so one press is one toggle. */
+function bindToggle(): void {
+  window.addEventListener('keydown', (event: KeyboardEvent) => {
+    if (event.repeat) return;
+    if (crosshairCommandForEvent(event) == null) return;
+    hidden = toggleCrosshairHidden(hidden);
+  });
+}
+
 defineSystem({
   name: 'crosshair',
   order: 92,
@@ -253,6 +273,7 @@ defineSystem({
     diag.mark = 'none';
 
     registerResettable('crosshair', resetCrosshairRun);
+    bindToggle();
 
     window.__crosshair = {
       centre: () => ({ x: diag?.centreXPx ?? 0, y: diag?.centreYPx ?? 0 }),
@@ -265,6 +286,20 @@ defineSystem({
 
   update(ctx, deltaMs) {
     if (combat == null || diag == null) return;
+    // Hidden means absent, not transparent (FR-015, US4-S3): the quad leaves the
+    // camera, so the frame it is hidden on costs no draw call — a transparent
+    // quad would still spend one. Crossing either way forces a recomposite, so
+    // the canvas never shows a gap the reticle breathed to while it was away.
+    if (quad != null) {
+      if (hidden && quad.parent != null) {
+        ctx.camera.remove(quad);
+        drawnGap = -1;
+      } else if (!hidden && quad.parent == null) {
+        ctx.camera.add(quad);
+        drawnGap = -1;
+      }
+    }
+    diag.hidden = hidden;
     // The sources the reticle reads (US2): the combat diagnostics for the
     // active weapon and the shot counter, the player diagnostics for the
     // measured speed. When either has not published yet the reticle holds the
@@ -305,8 +340,11 @@ defineSystem({
     // has moved further than the declared epsilon — or when the mark ignites or
     // expires, which is the other thing the canvas carries: a reticle at rest
     // costs no canvas work, and a breathing one is never more than that behind.
-    if (Math.abs(gap - drawnGap) > CROSSHAIR_REDRAW_EPSILON_PX
-      || currentMark.kind !== drawnMark) {
+    // A hidden one costs neither: the strokes are not recomputed at all, and
+    // re-showing forced a recomposite above.
+    if (!hidden
+      && (Math.abs(gap - drawnGap) > CROSSHAIR_REDRAW_EPSILON_PX
+        || currentMark.kind !== drawnMark)) {
       drawStrokes(gap, currentMark.kind);
       drawnGap = gap;
       drawnMark = currentMark.kind;
@@ -314,7 +352,6 @@ defineSystem({
       diag.composites += 1;
     }
     diag.gap = gap;
-    diag.hidden = quad == null || quad.visible === false;
   },
 
   resize(ctx, width, height) {

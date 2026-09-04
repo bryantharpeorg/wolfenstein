@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
@@ -9,6 +9,14 @@ import {
 import {
   CROSSHAIR_DIAGNOSTIC_FIELDS, createCrosshairDiagnostics, ensureCrosshairDiag,
 } from '../../src/hud/crosshair-diag';
+import {
+  CROSSHAIR_TOGGLE_KEY_CODES, crosshairCommandForEvent, crosshairCommandForKeyCode,
+  toggleCrosshairHidden,
+} from '../../src/hud/crosshair-bindings';
+import {
+  INTERACT_KEY_CODES, commandForKeyCode as interactCommandForKeyCode,
+} from '../../src/interaction/bindings';
+import { WEAPON_SELECT_KEY_CODES, weaponForKeyCode } from '../../src/combat/weapons';
 import { createDiagnostics } from '../../src/diag/diag';
 
 // FR-001 / FR-002, US1-S1 / US1-S2. The reticle's geometry is a pure function:
@@ -235,5 +243,81 @@ describe('the crosshair diagnostics shape (FR-005, US1-S6)', () => {
     const before = Object.keys(diag).sort();
     expect(ensureCrosshairDiag(diag)).toBe(ensureCrosshairDiag(diag));
     expect(Object.keys(diag).sort()).toEqual([...before, 'crosshair'].sort());
+  });
+});
+
+// FR-014, US4-S1 / US4-S2 / US4-S5. The toggle is a binding like 004's interact
+// keys and 007's weapon selects: one table both directions of one command resolve
+// through, declared beside them in its own module because it governs the reticle
+// and reaches into neither of theirs. The tests need no KeyboardEvent — the
+// resolver is structural — and the "one table" claim is held by a scan of every
+// source file, not just the system's own.
+describe('the crosshair toggle binding (FR-014, US4-S1, US4-S2, US4-S5)', () => {
+  const SRC_ROOT = fileURLToPath(new URL('../../src/', import.meta.url));
+
+  /** Every `.ts` file under `src/`, recursive — the whole call-site surface the
+   *  one-table claim is made against. */
+  function everySourceFile(root: string): string[] {
+    const found: string[] = [];
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (entry.isDirectory()) found.push(...everySourceFile(resolve(root, entry.name)));
+      else if (entry.name.endsWith('.ts')) found.push(resolve(root, entry.name));
+    }
+    return found;
+  }
+
+  const otherCodes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR', 'Space', 'KeyE', 'F1',
+    'ControlLeft', 'ControlRight', 'Digit1', 'Digit2', 'Digit3', 'Digit5', 'Digit8',
+    'ShiftLeft', 'Escape', 'Enter', 'keyH', 'KeyH ', '', 'KeyJ'];
+
+  it('maps the declared toggle key to the one toggle command, and nothing else to it', () => {
+    expect([...CROSSHAIR_TOGGLE_KEY_CODES]).toEqual(['KeyH']);
+    expect(crosshairCommandForKeyCode('KeyH')).toBe('toggle-crosshair');
+    for (const code of otherCodes) expect(crosshairCommandForKeyCode(code), code).toBeNull();
+  });
+
+  it('resolves a keyboard event through the same table', () => {
+    expect(crosshairCommandForEvent({ code: 'KeyH' })).toBe('toggle-crosshair');
+    expect(crosshairCommandForEvent({ code: 'KeyJ' })).toBeNull();
+    expect(crosshairCommandForEvent({})).toBeNull();
+  });
+
+  it('collides with neither 004\'s interact bindings nor 007\'s weapon selects', () => {
+    const interact = new Set<string>(INTERACT_KEY_CODES);
+    const weaponSelects = new Set(Object.keys(WEAPON_SELECT_KEY_CODES));
+    for (const code of CROSSHAIR_TOGGLE_KEY_CODES) {
+      expect(interact.has(code), `${code} collides with 004's interact bindings`).toBe(false);
+      expect(weaponSelects.has(code), `${code} collides with 007's weapon selects`).toBe(false);
+      expect(interactCommandForKeyCode(code), `${code} answers the interact command`).toBeNull();
+      expect(weaponForKeyCode(code), `${code} answers a weapon select`).toBeNull();
+    }
+    // And the reverse direction: the toggle key is not inside either table.
+    expect(crosshairCommandForKeyCode('Space')).toBeNull();
+    expect(crosshairCommandForKeyCode('KeyE')).toBeNull();
+    expect(crosshairCommandForKeyCode('Digit1')).toBeNull();
+    expect(crosshairCommandForKeyCode('Digit2')).toBeNull();
+    expect(crosshairCommandForKeyCode('Digit3')).toBeNull();
+  });
+
+  it('is declared in one table, and no call site maps the key itself', () => {
+    const declaring = everySourceFile(SRC_ROOT).filter((path) => {
+      const source = readFileSync(path, 'utf8');
+      return source.includes('KeyH');
+    });
+    expect(declaring).toEqual([resolve(SRC_ROOT, 'hud/crosshair-bindings.ts')]);
+  });
+
+  it('installs exactly one keydown listener in the crosshair system, through the table', () => {
+    const system = readFileSync(resolve(SRC_ROOT, 'systems/crosshair/register.ts'), 'utf8');
+    expect(system.match(/addEventListener\(\s*'keydown'/g) ?? []).toHaveLength(1);
+    expect(system).toMatch(/crosshairCommandFor(Event|KeyCode)/);
+    expect(/'KeyH'|"KeyH"/.test(system)).toBe(false);
+  });
+
+  it('toggling twice returns to the original state — one command, both directions', () => {
+    expect(toggleCrosshairHidden(false)).toBe(true);
+    expect(toggleCrosshairHidden(true)).toBe(false);
+    expect(toggleCrosshairHidden(toggleCrosshairHidden(false))).toBe(false);
+    expect(toggleCrosshairHidden(toggleCrosshairHidden(true))).toBe(true);
   });
 });
