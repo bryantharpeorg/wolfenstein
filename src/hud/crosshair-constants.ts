@@ -44,6 +44,22 @@ export const CROSSHAIR_DECAY_SECONDS = 0.18;
  *  movement stops, so stopping is not instant precision. */
 export const CROSSHAIR_SETTLE_SECONDS = 0.35;
 
+/** How close to the resting gap "settled" means, in pixels: once the declared
+ *  settle time has passed with no movement and no fire, the gap sits within
+ *  this of the weapon's resting value (FR-010). */
+export const CROSSHAIR_SETTLE_TOLERANCE_PX = 1;
+
+/** How far apart the gaps of the same weapon, speed and shot sequence stepped
+ *  at 1 ms and at 250 ms may land, in pixels: the stepper eases
+ *  exponentially, so the two runs agree far inside this (FR-010). */
+export const CROSSHAIR_DT_TOLERANCE_PX = 0.5;
+
+/** The smallest change in the gap, in pixels, worth recompositing the strokes
+ *  for: the gap eases continuously, so an exact-equality redraw test would
+ *  redraw every frame the reticle breathes, and a still reticle must cost no
+ *  canvas work at all (US2, the 005 no-per-frame-work rule). */
+export const CROSSHAIR_REDRAW_EPSILON_PX = 0.05;
+
 // --- Hit and kill marks (US3) ---
 
 /** Seconds a hit mark stays on the reticle after `hits` moves. */
