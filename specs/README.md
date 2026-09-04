@@ -1,9 +1,10 @@
 # Specs
 
-Eight feature specs, one per milestone of the brief, and a ninth for the tooling that
-verifies them. Each dispatches as its own epic through Ergane; within an epic, one node per
-user story. Build them in numeric order — each spec's Work Graph assumes the previous spec
-has landed.
+Eight feature specs, one per milestone of the brief; a ninth for the tooling that
+verifies them; and a tenth, `010-crosshair`, answered out of the playtest the ninth runs
+rather than out of the brief. Each dispatches as its own epic through Ergane; within an
+epic, one node per user story. Build them in numeric order — each spec's Work Graph
+assumes the previous spec has landed.
 
 | Spec | Milestone | Ships | Nodes |
 |---|---|---|---|
@@ -16,8 +17,9 @@ has landed.
 | `007-combat-hud` | M6 | Three weapons, hitscan, ammo, HUD, pickups, death/restart | 4 |
 | `008-polish` | M7 | Post-processing, procedural audio, elevator exit, stats screen | 4 |
 | `009-playtest-uat` | — | `npm run play`: a headed agent clears the level through real input, recorded to video beside a two-tier verdict | 4 |
+| `010-crosshair` | — | a centred reticle whose resting gap is each weapon's own `maxSpreadRadians`, spread and recoil feedback, hit/kill marks, and the `KeyH` toggle — the first spec answering a play observation rather than a milestone of the brief | 4 |
 
-33 nodes across 9 epics, 136 functional requirements, every one implemented by exactly one
+37 nodes across 10 epics, 153 functional requirements, every one implemented by exactly one
 story. `node tools/validate-specs.mjs` is the check, and it must be green before dispatch.
 
 `009-playtest-uat` is the first spec in this repository that **no gate executes**, and
@@ -27,16 +29,23 @@ be a required check. It is also the only thing in the repository that drives the
 a player actually touches — every other verification of movement, look and fire goes through
 an injected event source or the `window.__playerDrive` seam.
 
-**Build state, 2026-09-02.** 28 of 33 stories have landed and the game is playable and
-published. All four of `009-playtest-uat` are unbuilt — it was authored on 2026-09-02 and
-has not been dispatched. Among 001–008 the one unbuilt story remains `005-materials` US5
-(shadow-mapped lights, ambient and fog, FR-012/013/014) — nothing under `src/lighting/`
-exists, there is no `Fog` in the tree, and `__diag.materials.lights` and `.shadowsEnabled`
-are declared but never written. It is the only story of 001–008 with zero implementing
-files. Two 005 US4 tasks are also outstanding (T040 move derivation off the animation
-frame, T041 the cost assertions in `tools/smoke-checks/materials.mjs`). Note that the 005
-row above read `4` until 2026-09-01: the US3/US4 split landed on 2026-08-31 and the table
-was never updated.
+**Build state, 2026-09-04.** 33 of 37 stories have landed and the game is playable and
+published. `010-crosshair` shipped whole — the first spec born from watching the
+playtest rather than from the brief: a centred reticle whose resting gap is each weapon's
+own `maxSpreadRadians` scaled (never a second tuning table), a gap that opens with
+movement and recoil and settles over declared times, hit and kill marks driven by the
+`hits`/`kills` counters the combat diagnostics already publish, and `KeyH` toggling it in
+both directions with the preference surviving restart. The whole of it stands behind
+evidence: `tools/smoke-checks/crosshair.mjs` under `npm run smoke` (diagnostics, gap
+ordering, movement response, draw-call budget, toggle), and three soft observations in
+`npm run play`'s record. Still unbuilt: `009-playtest-uat` US2–US4, and among 001–008
+`005-materials` US5 (shadow-mapped lights, ambient and fog, FR-012/013/014) — nothing
+under `src/lighting/` exists, there is no `Fog` in the tree, and `__diag.materials.lights`
+and `.shadowsEnabled` are declared but never written. It is the only story of 001–008 with
+zero implementing files. Two 005 US4 tasks are also outstanding (T040 move derivation off
+the animation frame, T041 the cost assertions in `tools/smoke-checks/materials.mjs`). Note
+that the 005 row above read `4` until 2026-09-01: the US3/US4 split landed on 2026-08-31
+and the table was never updated.
 
 **Not covered by any spec:** deployment. The game is published to GitHub Pages by
 `.github/workflows/pages.yml` and is live, but no spec, FR or gate describes that surface —

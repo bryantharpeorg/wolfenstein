@@ -27,6 +27,9 @@ import {
   HarnessFault, acquirePointerLock, createLook, frames, interact, readPlayer, until,
 } from './play/driver.mjs';
 import { loadNav, walkToTile } from './play/navigate.mjs';
+import {
+  collectCrosshairObservations, describeObservations, installCrosshairSampler,
+} from './play/crosshair.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -96,6 +99,9 @@ async function playOnce(browser, url, attemptDir) {
       timeout: 20000,
     });
     await frames(page, SETTLE_FRAMES);
+    // T023 (FR-017): watch the reticle from before the first command, so the
+    // observations cover the whole playthrough, first click included.
+    await installCrosshairSampler(page);
 
     await acquirePointerLock(page);
     const look = createLook(page);
@@ -143,6 +149,10 @@ async function playOnce(browser, url, attemptDir) {
     else outcome.reason = error instanceof Error ? error.message : String(error);
     return outcome;
   } finally {
+    // T023: collected while the page still lives, whatever the playthrough did —
+    // a run that died mid-leg still reports what the reticle did up to there.
+    // Soft criteria only (FR-017): this line cannot move `passed`.
+    outcome.crosshair = await collectCrosshairObservations(page);
     const video = page.video();
     await context.close();
     if (video != null) {
@@ -224,6 +234,11 @@ async function main() {
     console.error(`FAIL — ${outcome.fault ?? outcome.reason ?? 'the run did not complete'}`);
     if (outcome.diagErrors.length > 0) console.error(`  __diag.errors: ${outcome.diagErrors.join(' | ')}`);
     if (outcome.pageErrors.length > 0) console.error(`  pageerror: ${outcome.pageErrors.join(' | ')}`);
+  }
+  // The crosshair's observations, as soft criteria (FR-017): reported whichever
+  // way the verdict went, and never allowed to change it.
+  if (outcome.crosshair != null) {
+    say(`  crosshair (soft): ${describeObservations(outcome.crosshair)}`);
   }
   say(`Record written to ${OUTPUT_DIR}`);
   process.exit(passed ? 0 : 1);
