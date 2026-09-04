@@ -15,13 +15,21 @@ import { CanvasTexture, LinearFilter, Mesh, MeshBasicMaterial, PlaneGeometry,
   SRGBColorSpace, Vector3 } from 'three';
 import { defineSystem, type GameContext } from '../../boot/registry';
 import { ensureCombatDiag, type CombatDiagnostics } from '../../combat/combat-diag';
+import { registerResettable } from '../../combat/restart';
 import { weaponFor } from '../../combat/weapons';
+import { currentRunState } from '../../run/state';
 import { HUD_RENDER_ORDER } from '../hud/register';
 import {
   CROSSHAIR_ARM_LENGTH_PX, CROSSHAIR_CANVAS_PX, CROSSHAIR_COLOUR, CROSSHAIR_GAP_SCALE,
   CROSSHAIR_SPAN_PX, CROSSHAIR_STROKE_WEIGHT_PX,
 } from '../../hud/crosshair-constants';
-import { CROSSHAIR_STROKE_COORDS, CROSSHAIR_STROKE_BUFFER_SIZE, fillCrosshairStrokes } from '../../hud/crosshair';
+import {
+  CROSSHAIR_STROKE_COORDS, CROSSHAIR_STROKE_BUFFER_SIZE, FEEDBACK_MARK_BUFFER_SIZE,
+  fillCrosshairStrokes, fillFeedbackMarkStrokes,
+} from '../../hud/crosshair';
+import {
+  NO_MARK, stepFeedbackMark, type FeedbackMark, type FeedbackMarkKind,
+} from '../../hud/crosshair-feedback';
 import { ensureCrosshairDiag, type CrosshairDiagnostics } from '../../hud/crosshair-diag';
 
 const DEGREES_TO_RADIANS = Math.PI / 180;
@@ -45,10 +53,28 @@ let context: CanvasRenderingContext2D | null = null;
  *  frame (T006): order 92 runs every frame, and 005 established per-frame
  *  derivation as the cost that matters on this project. */
 const strokes = new Float64Array(CROSSHAIR_STROKE_BUFFER_SIZE);
+/** The active mark's strokes, in the same buffer shape — written by
+ *  `fillFeedbackMarkStrokes` when the mark changes, never per frame. */
+const markStrokes = new Float64Array(FEEDBACK_MARK_BUFFER_SIZE);
+
+// --- US3 (T018): the mark state machine, held at the render edge. The
+// previous counters move every frame regardless of the gate, so a rise consumed
+// while the run is not being played lights nothing on the frame it happened or
+// the frame after; the mark itself is cleared the frame the gate closes, and
+// reset — with the gap — on 007's restart.
+
+let currentMark: FeedbackMark = NO_MARK;
+let prevHits = 0;
+let prevKills = 0;
 
 /** The gap last drawn. The strokes are recomputed only when the gap moves — a
  *  weapon switch in this story — so a still reticle costs no canvas work. */
 let drawnGap = -1;
+
+/** The mark kind last drawn, so an igniting or expiring mark is the only other
+ *  thing that recomputes the canvas: the decay runs on its own clock and the
+ *  drawn mark is constant until it does. */
+let drawnMark: FeedbackMarkKind = 'none';
 
 /** The viewport height the geometry was last fitted to, so a resize is the only
  *  thing that repositions the quad. */
@@ -103,9 +129,10 @@ function restingGapPx(weapon: CombatDiagnostics['weapon']): number {
   return weaponFor(weapon).maxSpreadRadians * CROSSHAIR_GAP_SCALE;
 }
 
-/** Draws the current stroke set into the canvas. One canvas pixel per screen
+/** Draws the current stroke set — the reticle's arms and, when one is lit, the
+ *  active mark beside them — into the canvas. One canvas pixel per screen
  *  pixel across the span, so a declared pixel length is the length drawn. */
-function drawStrokes(gapPx: number): void {
+function drawStrokes(gapPx: number, mark: FeedbackMarkKind): void {
   if (context == null) return;
   const size = CROSSHAIR_CANVAS_PX;
   const centre = size / 2;
@@ -122,6 +149,12 @@ function drawStrokes(gapPx: number): void {
     const base = index * CROSSHAIR_STROKE_COORDS;
     context.moveTo(centre + strokes[base]!, centre + strokes[base + 1]!);
     context.lineTo(centre + strokes[base + 2]!, centre + strokes[base + 3]!);
+  }
+  const markCount = fillFeedbackMarkStrokes(mark, markStrokes);
+  for (let index = 0; index < markCount; index += 1) {
+    const base = index * CROSSHAIR_STROKE_COORDS;
+    context.moveTo(centre + markStrokes[base]!, centre + markStrokes[base + 1]!);
+    context.lineTo(centre + markStrokes[base + 2]!, centre + markStrokes[base + 3]!);
   }
   context.stroke();
 }
@@ -156,6 +189,19 @@ function overlayUuids(ctx: GameContext, own: string): string[] {
   return found;
 }
 
+/** 007's restart (US3-S7): no mark active, and a `drawnGap` of -1 so the first
+ *  frame after it recomputes the canvas at the starting weapon's resting gap.
+ *  The toggle preference US4 adds is deliberately not here: a display preference
+ *  is not run state, and the restart must not touch it. */
+function resetCrosshairRun(): void {
+  currentMark = NO_MARK;
+  prevHits = 0;
+  prevKills = 0;
+  drawnMark = 'none';
+  drawnGap = -1;
+  if (diag != null) diag.mark = 'none';
+}
+
 defineSystem({
   name: 'crosshair',
   order: 92,
@@ -183,7 +229,7 @@ defineSystem({
       quad.frustumCulled = false;
       ctx.camera.add(quad);
       fitQuad(ctx, window.innerWidth, window.innerHeight);
-      drawStrokes(restingGapPx(combat.weapon));
+      drawStrokes(restingGapPx(combat.weapon), 'none');
       drawnGap = restingGapPx(combat.weapon);
       if (texture != null) texture.needsUpdate = true;
       diag.composites += 1;
@@ -192,6 +238,9 @@ defineSystem({
     diag.renderOrder = RETICLE_RENDER_ORDER;
     diag.hidden = false;
     diag.armLengthPx = CROSSHAIR_ARM_LENGTH_PX;
+    diag.mark = 'none';
+
+    registerResettable('crosshair', resetCrosshairRun);
 
     window.__crosshair = {
       centre: () => ({ x: diag?.centreXPx ?? 0, y: diag?.centreYPx ?? 0 }),
@@ -202,13 +251,32 @@ defineSystem({
     };
   },
 
-  update(ctx) {
+  update(ctx, deltaMs) {
     if (combat == null || diag == null) return;
     diag.sourcesDefined = ctx.diag.combat != null && ctx.diag.player != null;
+
+    // The run state arrives through `currentRunState()` rather than through
+    // `ctx.diag.run.state`: the stats screen publishes that field at order 95,
+    // *after* this system runs, so the accessor is the same-frame source of the
+    // fact the published field carries — the same reason the HUD at 90 reads
+    // combat's counters instead of waiting for a later system's publish.
+    currentMark = stepFeedbackMark(currentMark, {
+      prevHits,
+      hits: combat.hits,
+      prevKills,
+      kills: combat.kills,
+      runState: currentRunState(),
+      dead: combat.dead,
+    }, deltaMs / 1000);
+    prevHits = combat.hits;
+    prevKills = combat.kills;
+    diag.mark = currentMark.kind;
+
     const gap = restingGapPx(combat.weapon);
-    if (gap !== drawnGap) {
-      drawStrokes(gap);
+    if (gap !== drawnGap || currentMark.kind !== drawnMark) {
+      drawStrokes(gap, currentMark.kind);
       drawnGap = gap;
+      drawnMark = currentMark.kind;
       if (texture != null) texture.needsUpdate = true;
       diag.composites += 1;
     }
