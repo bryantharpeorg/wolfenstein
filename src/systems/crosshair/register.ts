@@ -16,12 +16,12 @@ import { CanvasTexture, LinearFilter, Mesh, MeshBasicMaterial, PlaneGeometry,
 import { defineSystem, type GameContext } from '../../boot/registry';
 import { ensureCombatDiag, type CombatDiagnostics } from '../../combat/combat-diag';
 import { registerResettable } from '../../combat/restart';
-import { weaponFor } from '../../combat/weapons';
+import { DEFAULT_WEAPON } from '../../combat/weapons';
 import { currentRunState } from '../../run/state';
 import { HUD_RENDER_ORDER } from '../hud/register';
 import {
-  CROSSHAIR_ARM_LENGTH_PX, CROSSHAIR_CANVAS_PX, CROSSHAIR_COLOUR, CROSSHAIR_GAP_SCALE,
-  CROSSHAIR_SPAN_PX, CROSSHAIR_STROKE_WEIGHT_PX,
+  CROSSHAIR_ARM_LENGTH_PX, CROSSHAIR_CANVAS_PX, CROSSHAIR_COLOUR,
+  CROSSHAIR_REDRAW_EPSILON_PX, CROSSHAIR_SPAN_PX, CROSSHAIR_STROKE_WEIGHT_PX,
 } from '../../hud/crosshair-constants';
 import {
   CROSSHAIR_STROKE_COORDS, CROSSHAIR_STROKE_BUFFER_SIZE, FEEDBACK_MARK_BUFFER_SIZE,
@@ -30,6 +30,11 @@ import {
 import {
   NO_MARK, stepFeedbackMark, type FeedbackMark, type FeedbackMarkKind,
 } from '../../hud/crosshair-feedback';
+import {
+  createCrosshairSpreadState, restingGapPx, stepCrosshairSpread,
+  type CrosshairSpreadState,
+} from '../../hud/crosshair-spread';
+import { DELTA_CLAMP_MS } from '../../player/params';
 import { ensureCrosshairDiag, type CrosshairDiagnostics } from '../../hud/crosshair-diag';
 
 const DEGREES_TO_RADIANS = Math.PI / 180;
@@ -42,6 +47,8 @@ const RETICLE_RENDER_ORDER = HUD_RENDER_ORDER + 1;
 
 let combat: CombatDiagnostics | null = null;
 let diag: CrosshairDiagnostics | null = null;
+/** The spread stepper's state (US2): owned here, updated in place each frame. */
+let spread: CrosshairSpreadState | null = null;
 let texture: CanvasTexture | null = null;
 let quad: Mesh | null = null;
 /** The 2D drawing surface the strokes are recomputed into. Created here, not in
@@ -67,8 +74,9 @@ let currentMark: FeedbackMark = NO_MARK;
 let prevHits = 0;
 let prevKills = 0;
 
-/** The gap last drawn. The strokes are recomputed only when the gap moves — a
- *  weapon switch in this story — so a still reticle costs no canvas work. */
+/** The gap last drawn. The strokes are recomputed only when the gap has moved
+ *  further than the declared epsilon, so a reticle at rest — and one easing by
+ *  less than a pixel's fraction — costs no canvas work. */
 let drawnGap = -1;
 
 /** The mark kind last drawn, so an igniting or expiring mark is the only other
@@ -123,15 +131,11 @@ function fitQuad(ctx: GameContext, viewportWidth: number, viewportHeight: number
   }
 }
 
-/** Restates nothing from the weapon table: the resting gap is the weapon's own
- *  declared spread, scaled into pixels (FR-007). */
-function restingGapPx(weapon: CombatDiagnostics['weapon']): number {
-  return weaponFor(weapon).maxSpreadRadians * CROSSHAIR_GAP_SCALE;
-}
-
 /** Draws the current stroke set — the reticle's arms and, when one is lit, the
- *  active mark beside them — into the canvas. One canvas pixel per screen
- *  pixel across the span, so a declared pixel length is the length drawn. */
+ *  active mark beside them — into the canvas. One canvas pixel per screen pixel
+ *  across the span, so a declared pixel length is the length drawn. Nothing
+ *  from the weapon table is restated here: the gap arrives already derived,
+ *  from `crosshair-spread.ts`'s read of the table's own accessor (FR-007). */
 function drawStrokes(gapPx: number, mark: FeedbackMarkKind): void {
   if (context == null) return;
   const size = CROSSHAIR_CANVAS_PX;
@@ -199,6 +203,11 @@ function resetCrosshairRun(): void {
   prevKills = 0;
   drawnMark = 'none';
   drawnGap = -1;
+  // The gap is run state too (US2): a restart returns the reticle to the
+  // starting weapon's resting gap with no recoil owed and no shots counted.
+  // `DEFAULT_WEAPON` rather than `combat.weapon`, because the resettables run
+  // in registration order and combat's own reset may not have landed yet.
+  spread = createCrosshairSpreadState(DEFAULT_WEAPON);
   if (diag != null) diag.mark = 'none';
 }
 
@@ -209,6 +218,7 @@ defineSystem({
   setup(ctx) {
     combat = ensureCombatDiag(ctx.diag);
     diag = ensureCrosshairDiag(ctx.diag);
+    spread = createCrosshairSpreadState(combat.weapon);
 
     surface = document.createElement('canvas');
     surface.width = CROSSHAIR_CANVAS_PX;
@@ -229,8 +239,10 @@ defineSystem({
       quad.frustumCulled = false;
       ctx.camera.add(quad);
       fitQuad(ctx, window.innerWidth, window.innerHeight);
-      drawStrokes(restingGapPx(combat.weapon), 'none');
-      drawnGap = restingGapPx(combat.weapon);
+      const resting = restingGapPx(combat.weapon);
+      drawStrokes(resting, 'none');
+      drawnGap = resting;
+      diag.gap = resting;
       if (texture != null) texture.needsUpdate = true;
       diag.composites += 1;
     }
@@ -253,7 +265,13 @@ defineSystem({
 
   update(ctx, deltaMs) {
     if (combat == null || diag == null) return;
-    diag.sourcesDefined = ctx.diag.combat != null && ctx.diag.player != null;
+    // The sources the reticle reads (US2): the combat diagnostics for the
+    // active weapon and the shot counter, the player diagnostics for the
+    // measured speed. When either has not published yet the reticle holds the
+    // resting gap of the default weapon rather than throwing, and says so.
+    const combatSource = ctx.diag.combat;
+    const playerSource = ctx.diag.player;
+    diag.sourcesDefined = combatSource != null && playerSource != null;
 
     // The run state arrives through `currentRunState()` rather than through
     // `ctx.diag.run.state`: the stats screen publishes that field at order 95,
@@ -272,8 +290,23 @@ defineSystem({
     prevKills = combat.kills;
     diag.mark = currentMark.kind;
 
-    const gap = restingGapPx(combat.weapon);
-    if (gap !== drawnGap || currentMark.kind !== drawnMark) {
+    // The frame's own delta, clamped the way 003 clamps locomotion's, so a
+    // tab-restore-sized frame opens the reticle no further than a long one.
+    const seconds = Math.min(Math.max(deltaMs, 0), DELTA_CLAMP_MS) / 1000;
+    const gap = combatSource == null || spread == null
+      ? restingGapPx(DEFAULT_WEAPON)
+      : stepCrosshairSpread(spread, {
+        weapon: combatSource.weapon,
+        speed: playerSource?.speed ?? 0,
+        shotsFired: combatSource.shotsFired,
+        elapsedSeconds: seconds,
+      });
+    // The gap breathes continuously, so the strokes are recomputed only when it
+    // has moved further than the declared epsilon — or when the mark ignites or
+    // expires, which is the other thing the canvas carries: a reticle at rest
+    // costs no canvas work, and a breathing one is never more than that behind.
+    if (Math.abs(gap - drawnGap) > CROSSHAIR_REDRAW_EPSILON_PX
+      || currentMark.kind !== drawnMark) {
       drawStrokes(gap, currentMark.kind);
       drawnGap = gap;
       drawnMark = currentMark.kind;
