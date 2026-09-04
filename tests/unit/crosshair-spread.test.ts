@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { WEAPON_KINDS, weaponFor, type WeaponKind } from '../../src/combat/weapons';
 import {
-  CROSSHAIR_GAP_SCALE, CROSSHAIR_MOVEMENT_OPEN_PX,
+  CROSSHAIR_DT_TOLERANCE_PX, CROSSHAIR_GAP_SCALE, CROSSHAIR_MOVEMENT_OPEN_PX,
   CROSSHAIR_RECOIL_PX, CROSSHAIR_SETTLE_SECONDS, CROSSHAIR_SETTLE_TOLERANCE_PX,
 } from '../../src/hud/crosshair-constants';
 import {
@@ -219,5 +219,119 @@ describe('settling (FR-010, US2-S5)', () => {
     }
     expect(Math.abs(gap - restingGapPx(kind)))
       .toBeLessThanOrEqual(CROSSHAIR_SETTLE_TOLERANCE_PX);
+  });
+});
+describe('the same sequence at 1 ms and at 250 ms (FR-010, US2-S6, SC-004)', () => {
+  // One declared sequence: rest, sprint, stop, walk, with a weapon switch at
+  // 1.5 s and shots at 0.75 s, 1.5 s, 2.25 s and 2.75 s. Every boundary —
+  // the switch, the shots, the speed segments — sits on a multiple of the
+  // coarse delta, and each step reads its inputs at the instant the step
+  // *begins*, so both runs hold the same inputs over the same elapsed time
+  // and the comparison measures the stepper's elapsed-seconds discipline
+  // rather than how finely either run can resolve an input change. A speed
+  // segment holds from its first instant up to the next one's, so a boundary
+  // instant belongs to the segment that starts there.
+  const SCENARIO = {
+    start: 'pistol' as WeaponKind,
+    switchAt: 1.5,
+    switched: 'chaingun' as WeaponKind,
+    speeds: [
+      { from: 0.0, speed: 0 },
+      { from: 0.5, speed: SPRINT_SPEED },
+      { from: 1.25, speed: 0 },
+      { from: 2.0, speed: WALK_SPEED },
+    ],
+    shots: [0.75, 1.5, 2.25, 2.75],
+    duration: 3.0,
+  };
+  const SAMPLE_EVERY = 0.25;
+
+  const speedAt = (t: number): number =>
+    [...SCENARIO.speeds].reverse().find((segment) => t >= segment.from - 1e-9)?.speed ?? 0;
+
+  function simulate(dtSeconds: number): number[] {
+    const state = createCrosshairSpreadState(SCENARIO.start);
+    const steps = Math.round(SCENARIO.duration / dtSeconds);
+    const samples: number[] = [];
+    let shots = 0;
+    for (let index = 0; index < steps; index += 1) {
+      const starts = index * dtSeconds;
+      const ends = (index + 1) * dtSeconds;
+      // The shot is an impulse the step observes at its end — the frame the
+      // counter moves reports the full recoil — so both runs place it at the
+      // same instant and decay it identically thereafter.
+      while (shots < SCENARIO.shots.length && SCENARIO.shots[shots]! <= ends + 1e-9) shots += 1;
+      const weapon = starts >= SCENARIO.switchAt - 1e-9 ? SCENARIO.switched : SCENARIO.start;
+      const gap = stepCrosshairSpread(state, {
+        weapon, speed: speedAt(starts), shotsFired: shots, elapsedSeconds: dtSeconds,
+      });
+      if (Math.abs(ends / SAMPLE_EVERY - Math.round(ends / SAMPLE_EVERY)) < 1e-9) samples.push(gap);
+    }
+    return samples;
+  }
+
+  it('lands both steppings on the same gaps, within the declared tolerance', () => {
+    const fine = simulate(0.001);
+    const coarse = simulate(0.25);
+    expect(fine).toHaveLength(coarse.length);
+    expect(fine.length).toBeGreaterThan(5);
+    // Not vacuous: the sequence genuinely moves the gap around.
+    expect(Math.max(...fine) - Math.min(...fine)).toBeGreaterThan(CROSSHAIR_RECOIL_PX);
+    for (let index = 0; index < fine.length; index += 1) {
+      expect(Math.abs(fine[index]! - coarse[index]!))
+        .toBeLessThanOrEqual(CROSSHAIR_DT_TOLERANCE_PX);
+    }
+  });
+
+  it('lands both steppings on the same gaps at an intermediate delta too', () => {
+    const fine = simulate(0.001);
+    const middle = simulate(0.05);
+    expect(middle).toHaveLength(fine.length);
+    for (let index = 0; index < fine.length; index += 1) {
+      expect(Math.abs(fine[index]! - middle[index]!))
+        .toBeLessThanOrEqual(CROSSHAIR_DT_TOLERANCE_PX);
+    }
+  });
+});
+
+describe('a weapon switch eases, not snaps (US2-S7)', () => {
+  const REST_SECONDS = 0.016;
+
+  function settledOn(kind: WeaponKind): ReturnType<typeof createCrosshairSpreadState> {
+    const state = settledState(kind);
+    stepOnce(state, kind, 0, 0, REST_SECONDS);
+    return state;
+  }
+
+  it('moves the gap toward the new resting value from below without overshooting it', () => {
+    const state = settledOn('pistol');
+    const from = restingGapPx('pistol');
+    const to = restingGapPx('chaingun');
+    let gap = stepOnce(state, 'chaingun', 0, 0, REST_SECONDS);
+    expect(gap).toBeGreaterThan(from);
+    expect(gap).toBeLessThan(to);
+    for (let step = 0; step < 100; step += 1) {
+      const next = stepOnce(state, 'chaingun', 0, 0, REST_SECONDS);
+      expect(next).toBeGreaterThanOrEqual(gap);
+      expect(next).toBeLessThan(to);
+      gap = next;
+    }
+    expect(gap).toBeGreaterThanOrEqual(to - CROSSHAIR_SETTLE_TOLERANCE_PX);
+  });
+
+  it('moves the gap toward the new resting value from above without undershooting it', () => {
+    const state = settledOn('chaingun');
+    const from = restingGapPx('chaingun');
+    const to = restingGapPx('pistol');
+    let gap = stepOnce(state, 'pistol', 0, 0, REST_SECONDS);
+    expect(gap).toBeLessThan(from);
+    expect(gap).toBeGreaterThan(to);
+    for (let step = 0; step < 100; step += 1) {
+      const next = stepOnce(state, 'pistol', 0, 0, REST_SECONDS);
+      expect(next).toBeLessThanOrEqual(gap);
+      expect(next).toBeGreaterThan(to);
+      gap = next;
+    }
+    expect(gap).toBeLessThanOrEqual(to + CROSSHAIR_SETTLE_TOLERANCE_PX);
   });
 });
