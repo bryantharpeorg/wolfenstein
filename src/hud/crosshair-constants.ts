@@ -53,6 +53,19 @@ export const CROSSHAIR_HIT_MARK_SECONDS = 0.18;
  *  louder event. */
 export const CROSSHAIR_KILL_MARK_SECONDS = 0.45;
 
+/** Pixels from the centre where a hit mark's segments begin. The gap between
+ *  them and the centre is what keeps the mark an X floating around the reticle
+ *  rather than a second set of arms. */
+export const CROSSHAIR_HIT_MARK_INNER_PX = 3;
+
+/** Pixels from the centre a hit mark's segments reach: an X of four
+ *  disconnected diagonals, distinct from the axis-aligned arms. */
+export const CROSSHAIR_HIT_MARK_RADIUS_PX = 10;
+
+/** Pixels from the centre the kill mark's ring reaches: a closed diamond drawn
+ *  past the hit mark's reach, a distinct shape rather than a brighter hit. */
+export const CROSSHAIR_KILL_MARK_RADIUS_PX = 16;
+
 // --- The quad's structure, not tuning, but retuning reads better beside it ---
 
 /** Screen pixels the reticle's canvas covers, edge to edge. The quad is sized

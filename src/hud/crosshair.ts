@@ -7,6 +7,18 @@
 // Every mark the crosshair ever draws is a stroke computed here. There is no
 // image file, no font and no glyph table (FR-002, Constitution II): a stroke is
 // two endpoints, and four of them are the whole reticle.
+//
+// The hit and kill marks (US3, T017) are stroke sets beside those arms, distinct
+// in shape rather than in brightness (FR-012): the hit mark is an X of four
+// disconnected diagonals floating around the centre, the kill mark a closed
+// diamond drawn past the X's reach — a different topology, so a kill never reads
+// as a hit drawn brighter. Only the kind arrives as an argument; the state
+// machine that produces it lives in `crosshair-feedback.ts`.
+
+import type { FeedbackMarkKind } from './crosshair-feedback';
+import {
+  CROSSHAIR_HIT_MARK_INNER_PX, CROSSHAIR_HIT_MARK_RADIUS_PX, CROSSHAIR_KILL_MARK_RADIUS_PX,
+} from './crosshair-constants';
 
 /** The viewport the strokes must fit inside, as an argument rather than a read
  *  of the browser's own dimensions. Only the height bears on the geometry: the reticle is square
@@ -108,4 +120,68 @@ export function crosshairStrokes(input: CrosshairStrokesInput): readonly Crossha
     });
   }
   return strokes;
+}
+
+// --- The hit and kill marks (US3, FR-012) ---
+
+/** The most strokes any mark ever needs: the hit mark's four and the kill
+ *  mark's four, so the marks share the buffer the reticle already has. */
+export const FEEDBACK_MARK_STROKE_COUNT = 4;
+
+/** What one stroke of either mark occupies in a flat buffer — the same four
+ *  coordinates the reticle's strokes use. */
+export const FEEDBACK_MARK_BUFFER_SIZE = FEEDBACK_MARK_STROKE_COUNT * CROSSHAIR_STROKE_COORDS;
+
+/** The hit mark: an X of four disconnected diagonals, from `INNER` pixels off
+ *  the centre out to `RADIUS`. The reticle's arms ride the axes; these do not,
+ *  which is what makes the mark a different shape from the reticle it hangs on. */
+function hitMarkStrokes(): readonly CrosshairStroke[] {
+  const inner = CROSSHAIR_HIT_MARK_INNER_PX;
+  const radius = CROSSHAIR_HIT_MARK_RADIUS_PX;
+  return [
+    { x1: -inner, y1: -inner, x2: -radius, y2: -radius },
+    { x1: inner, y1: inner, x2: radius, y2: radius },
+    { x1: -inner, y1: inner, x2: -radius, y2: radius },
+    { x1: inner, y1: -inner, x2: radius, y2: -radius },
+  ];
+}
+
+/** The kill mark: a closed diamond of four strokes joining the axis points at
+ *  `RADIUS` — every stroke's far endpoint the next stroke's near one, so the
+ *  mark reads as a ring enclosing the reticle rather than a brighter X. */
+function killMarkStrokes(): readonly CrosshairStroke[] {
+  const radius = CROSSHAIR_KILL_MARK_RADIUS_PX;
+  return [
+    { x1: 0, y1: -radius, x2: radius, y2: 0 },
+    { x1: radius, y1: 0, x2: 0, y2: radius },
+    { x1: 0, y1: radius, x2: -radius, y2: 0 },
+    { x1: -radius, y1: 0, x2: 0, y2: -radius },
+  ];
+}
+
+/** The mark's stroke set, allocated: what the tests and one-shot callers read.
+ *  A mark of kind `none` — or any kind the machine does not declare — is no
+ *  strokes at all, so the resting reticle draws no mark beside its arms. */
+export function feedbackMarkStrokes(kind: FeedbackMarkKind): readonly CrosshairStroke[] {
+  switch (kind) {
+    case 'hit': return hitMarkStrokes();
+    case 'kill': return killMarkStrokes();
+    case 'none': return [];
+  }
+}
+
+/** Writes the mark's strokes into `out` in the same `x1, y1, x2, y2` layout the
+ *  reticle's fill uses, so the render edge draws both from buffers it already
+ *  owns. Returns the stroke count written. */
+export function fillFeedbackMarkStrokes(kind: FeedbackMarkKind, out: Float64Array): number {
+  const strokes = feedbackMarkStrokes(kind);
+  for (let index = 0; index < strokes.length && index * CROSSHAIR_STROKE_COORDS < out.length; index += 1) {
+    const stroke = strokes[index]!;
+    const base = index * CROSSHAIR_STROKE_COORDS;
+    out[base] = stroke.x1;
+    out[base + 1] = stroke.y1;
+    out[base + 2] = stroke.x2;
+    out[base + 3] = stroke.y2;
+  }
+  return Math.min(strokes.length, Math.floor(out.length / CROSSHAIR_STROKE_COORDS));
 }

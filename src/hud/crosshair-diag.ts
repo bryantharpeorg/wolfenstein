@@ -9,6 +9,7 @@
 // harness read it.
 
 import type { Diagnostics } from '../diag/diag';
+import type { FeedbackMarkKind } from './crosshair-feedback';
 
 /** Every field FR-005 requires and the harness checks for, tagged with the
  *  story that gives it meaning. */
@@ -31,12 +32,14 @@ export interface CrosshairDiagnostics {
   spanPx: number; // US1
   /** How many times the stroke set has been recomputed and re-drawn. */
   composites: number; // US1
+  /** The mark the reticle is currently showing: none, hit or kill (US3). */
+  mark: FeedbackMarkKind; // US3
 }
 
 /** One list for the smoke harness to check the published object against. */
 export const CROSSHAIR_DIAGNOSTIC_FIELDS = [
   'gap', 'hidden', 'sourcesDefined', 'armLengthPx', 'renderOrder',
-  'centreXPx', 'centreYPx', 'spanPx', 'composites',
+  'centreXPx', 'centreYPx', 'spanPx', 'composites', 'mark',
 ] as const satisfies readonly (keyof CrosshairDiagnostics)[];
 
 declare module '../diag/diag' {
@@ -56,6 +59,7 @@ export function createCrosshairDiagnostics(): CrosshairDiagnostics {
     centreYPx: 0,
     spanPx: 0,
     composites: 0,
+    mark: 'none',
   };
 }
 
